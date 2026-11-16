@@ -59,6 +59,28 @@ public enum Shell {
     }
 }
 
+extension Shell {
+    private static var loginEnvCache: [String: String] = [:]
+    private static let loginEnvLock = NSLock()
+
+    /// Value of `name` in the user's login shell, or nil. Cached. Apps started from Finder do not see
+    /// variables exported in ~/.zshrc, so this bridges e.g. CLAUDE_CONFIG_DIR.
+    public static func loginShellVar(_ name: String) -> String? {
+        if let v = ProcessInfo.processInfo.environment[name], !v.isEmpty { return v }
+        loginEnvLock.lock(); defer { loginEnvLock.unlock() }
+        if let v = loginEnvCache[name] { return v.isEmpty ? nil : v }
+        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        let marker = "__HUSH__"
+        let r = try? Shell.run(shell, ["-l", "-i", "-c", "printf '\(marker)%s\(marker)' \"$\(name)\""], timeout: 8)
+        var value = ""
+        if let out = r?.stdout, let a = out.range(of: marker), let b = out.range(of: marker, range: a.upperBound..<out.endIndex) {
+            value = String(out[a.upperBound..<b.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        loginEnvCache[name] = value
+        return value.isEmpty ? nil : value
+    }
+}
+
 public enum Log {
     private static let lock = NSLock()
     public static var echo = false

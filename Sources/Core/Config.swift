@@ -44,6 +44,8 @@ public struct Config: Codable, Equatable {
     public var openAIBaseURL: String = "http://127.0.0.1:11434/v1"
     public var claudePath: String = ""
     public var codexPath: String = ""
+    /// Claude Code settings folder (CLAUDE_CONFIG_DIR). Empty = read it from the login shell, else Claude's default.
+    public var claudeConfigDir: String = ""
     /// whisper model file name inside `models/`.
     public var asrModel: String = "ggml-large-v3-turbo-q5_0.bin"
     /// Faster model for live captions + prompter. The big model still makes the final transcript after the meeting.
@@ -65,7 +67,7 @@ public struct Config: Codable, Equatable {
     public init() {}
 
     enum CodingKeys: String, CodingKey {
-        case provider, prompterProvider, model, prompterModel, openAIBaseURL, claudePath, codexPath, asrModel, liveAsrModel, language, storageDir,
+        case provider, prompterProvider, model, prompterModel, openAIBaseURL, claudePath, codexPath, claudeConfigDir, asrModel, liveAsrModel, language, storageDir,
              prompterOpacity, prompterAutoAnswer, contextFile, userName, keepAudio, acknowledgedAINotice, acknowledgedConsent, setupDone, lastHiddenCheck
     }
     /// Tolerant decoding: unknown or missing keys fall back to defaults, so old config files keep working.
@@ -79,6 +81,7 @@ public struct Config: Codable, Equatable {
         openAIBaseURL = (try? c.decode(String.self, forKey: .openAIBaseURL)) ?? d.openAIBaseURL
         claudePath = (try? c.decode(String.self, forKey: .claudePath)) ?? d.claudePath
         codexPath = (try? c.decode(String.self, forKey: .codexPath)) ?? d.codexPath
+        claudeConfigDir = (try? c.decode(String.self, forKey: .claudeConfigDir)) ?? d.claudeConfigDir
         asrModel = (try? c.decode(String.self, forKey: .asrModel)) ?? d.asrModel
         liveAsrModel = (try? c.decode(String.self, forKey: .liveAsrModel)) ?? d.liveAsrModel
         language = (try? c.decode(String.self, forKey: .language)) ?? d.language

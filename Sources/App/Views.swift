@@ -668,7 +668,10 @@ struct SettingsView: View {
                 if model.config.provider == .openAICompatible {
                     TextField("Base URL", text: $model.config.openAIBaseURL)
                 }
-                if model.config.provider == .claudeCLI { TextField("claude path (empty = auto)", text: $model.config.claudePath) }
+                if model.config.provider == .claudeCLI {
+                    TextField("claude path (empty = auto)", text: $model.config.claudePath)
+                    TextField("Claude settings folder, CLAUDE_CONFIG_DIR (empty = from your shell)", text: $model.config.claudeConfigDir)
+                }
                 if model.config.provider == .codexCLI { TextField("codex path (empty = auto)", text: $model.config.codexPath) }
                 if model.config.provider == .openAICompatible || model.config.provider == .anthropic {
                     SecureField("API key (stored in Keychain)", text: $model.settingsKey)

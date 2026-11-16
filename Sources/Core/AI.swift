@@ -17,7 +17,10 @@ public enum AI {
         if split { c.model = c.prompterModel; c.prompterModel = "" }
         switch kind {
         case .none: return nil
-        case .claudeCLI: return ClaudeCLIProvider(path: c.claudePath, model: c.model, fastModel: c.prompterModel)
+        case .claudeCLI:
+            var p = ClaudeCLIProvider(path: c.claudePath, model: c.model, fastModel: c.prompterModel)
+            p.configDir = c.claudeConfigDir.isEmpty ? (Shell.loginShellVar("CLAUDE_CONFIG_DIR") ?? "") : (c.claudeConfigDir as NSString).expandingTildeInPath
+            return p
         case .codexCLI: return CodexCLIProvider(path: c.codexPath, model: c.model)
         case .openAICompatible:
             return OpenAICompatibleProvider(baseURL: c.openAIBaseURL, model: c.model.isEmpty ? "llama3.2" : c.model,
@@ -32,6 +35,8 @@ public enum AI {
 
 public struct ClaudeCLIProvider: AIProvider {
     public var path: String, model: String, fastModel: String
+    /// CLAUDE_CONFIG_DIR for the child process; empty = Claude's default (~/.claude).
+    public var configDir: String = ""
     public var name: String { "claude-cli" }
     public init(path: String = "", model: String = "", fastModel: String = "") { self.path = path; self.model = model; self.fastModel = fastModel }
 
@@ -48,8 +53,13 @@ public struct ClaudeCLIProvider: AIProvider {
         guard let exe = Shell.which("claude", override: path) else { throw HushError.missing("claude CLI (install Claude Code, or set its path in Settings)") }
         // Run from a neutral folder so project CLAUDE.md files are not pulled into the prompt.
         let r = try Shell.run(exe, arguments(system: system, fast: fast), stdin: user, timeout: fast ? 60 : 300,
+                              env: configDir.isEmpty ? nil : ["CLAUDE_CONFIG_DIR": configDir],
                               cwd: FileManager.default.temporaryDirectory.path)
-        guard r.status == 0 else { throw HushError.provider("claude exit \(r.status): \(r.stderr.suffix(300))") }
+        guard r.status == 0 else {
+            // claude prints some failures (e.g. an expired login) on stdout, not stderr.
+            let msg = [r.stderr, r.stdout].map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.first { !$0.isEmpty } ?? "no message"
+            throw HushError.provider("claude exit \(r.status): \(msg.suffix(300))")
+        }
         return r.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

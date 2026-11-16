@@ -119,7 +119,9 @@ case "doctor":
     for (name, good, detail) in Engines.check(c) { print("\(good ? "ok  " : "MISS") \(name)  \(detail)"); ok = ok && good }
     print("AI   provider: \(c.provider.label)\(c.model.isEmpty ? "" : " (\(c.model))")")
     switch c.provider {
-    case .claudeCLI: print("     claude: \(Shell.which("claude", override: c.claudePath) ?? "NOT FOUND")")
+    case .claudeCLI:
+        print("     claude: \(Shell.which("claude", override: c.claudePath) ?? "NOT FOUND")")
+        print("     CLAUDE_CONFIG_DIR: \(c.claudeConfigDir.isEmpty ? (Shell.loginShellVar("CLAUDE_CONFIG_DIR") ?? "(default ~/.claude)") + " (from shell)" : c.claudeConfigDir)")
     case .codexCLI: print("     codex: \(Shell.which("codex", override: c.codexPath) ?? "NOT FOUND")")
     case .anthropic: print("     key in Keychain: \(Keychain.get("anthropic") != nil)")
     case .openAICompatible: print("     base URL: \(c.openAIBaseURL)  key set: \(Keychain.get("openai") != nil)")
@@ -140,6 +142,7 @@ case "config":
         case "openAIBaseURL": c.openAIBaseURL = v
         case "claudePath": c.claudePath = v
         case "codexPath": c.codexPath = v
+        case "claudeConfigDir": c.claudeConfigDir = v
         case "asrModel": c.asrModel = v
         case "language": c.language = v
         case "storageDir": c.storageDir = v.isEmpty ? nil : v
