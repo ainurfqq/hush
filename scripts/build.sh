@@ -27,6 +27,12 @@ cp scripts/fetch-engines.sh scripts/engines.lock "$APP/Contents/Resources/"
 mkdir -p "$APP/Contents/Resources/Fonts" && cp Resources/Fonts/* "$APP/Contents/Resources/Fonts/"
 [ -f Resources/AppIcon.icns ] && cp Resources/AppIcon.icns "$APP/Contents/Resources/"
 
-# Ad-hoc signature (no Apple Developer account). Stable identifier keeps permission prompts tied to the bundle id.
-codesign --force --deep --sign - --identifier id.roxst.hush "$APP" >/dev/null
+# Signing: the local "Hush Local Signing" certificate when present (scripts/make-signing-cert.sh), so macOS keeps
+# Microphone / Screen Recording permissions across updates; otherwise ad-hoc. Neither is an Apple Developer ID.
+SIGN_ID="$(security find-certificate -c "Hush Local Signing" -Z "$HOME/Library/Keychains/login.keychain-db" 2>/dev/null | awk '/SHA-1 hash:/ {print $3; exit}')"
+if [ -n "$SIGN_ID" ]; then
+  codesign --force --deep --sign "$SIGN_ID" --identifier id.roxst.hush "$APP" >/dev/null && echo "==> signed with Hush Local Signing"
+else
+  codesign --force --deep --sign - --identifier id.roxst.hush "$APP" >/dev/null && echo "==> ad-hoc signed (run scripts/make-signing-cert.sh to keep permissions across updates)"
+fi
 echo "==> built $ROOT/$APP"

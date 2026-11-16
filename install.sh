@@ -61,6 +61,11 @@ else
   echo "  $SRC @ $(git -C "$SRC" rev-parse --short HEAD)"
 fi
 
+if [ "${HUSH_NO_LOCAL_CERT:-0}" != "1" ]; then
+  step "Local signing certificate (keeps macOS permissions across updates)"
+  bash "$SRC/scripts/make-signing-cert.sh" || echo "  skipped: could not create the local certificate; using ad-hoc signing"
+fi
+
 step "Building (about 1-2 minutes)"
 bash "$SRC/scripts/build.sh"
 
