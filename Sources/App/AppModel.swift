@@ -189,7 +189,11 @@ final class AppModel: ObservableObject {
             }
             DispatchQueue.main.async {
                 self.busy[id] = nil; self.reload()
-                if !self.isRecording { self.prompterStatus = "Ready" }
+                if !self.isRecording {
+                    self.prompterStatus = "Ready"
+                    // Free ~600-800 MB between meetings; the next recording reloads it in a few seconds.
+                    if self.busy.isEmpty { WhisperServer.shared.stop(); Log.write("speech model unloaded (idle)") }
+                }
             }
         }
     }

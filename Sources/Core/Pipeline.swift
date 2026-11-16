@@ -87,22 +87,66 @@ public enum Pipeline {
 
         var segments: [Segment] = []
         var langState = SpeakerLanguages()
-        for (i, u) in units.enumerated() {
-            progress("Transcribing \(i + 1)/\(units.count)", 0.25 + 0.7 * Double(i) / Double(max(units.count, 1)))
-            let samples = cache[u.src]!
-            let a = max(0, Int((u.start - 0.15) * 16000)), b = min(samples.count, Int((u.end + 0.15) * 16000))
-            guard b - a > 1600 else { continue }
-            let f = tmp.appendingPathComponent("\(i).wav")
-            try WAV.write(samples[a..<b], to: f)
-            let piece = try transcribeTurn(f, speaker: u.spk, langState: &langState, config: config)
-            if piece.text.isEmpty || Transcriber.isLikelyHallucination(piece.text, duration: u.end - u.start) { continue }
-            segments.append(Segment(start: u.start, end: u.end, speaker: u.spk, text: piece.text, language: piece.language))
+        let windows = ProcessInfo.processInfo.environment["HUSH_NO_BATCH"] == "1"
+            ? units.indices.map { [$0] } : batch(units.map { ($0.src.path, $0.spk, $0.end - $0.start) })
+        for (wi, w) in windows.enumerated() {
+            progress("Transcribing \(wi + 1)/\(windows.count)", 0.25 + 0.7 * Double(wi) / Double(max(windows.count, 1)))
+            // Window audio = the turns of one speaker, back to back with 0.6 s silence between them.
+            var audio: [Float] = [], offsets: [Double] = []
+            for (k, ui) in w.enumerated() {
+                let u = units[ui], samples = cache[u.src]!
+                let a = max(0, Int((u.start - 0.15) * 16000)), b = min(samples.count, Int((u.end + 0.15) * 16000))
+                if k > 0 { audio += [Float](repeating: 0, count: Int(gap * 16000)) }
+                offsets.append(Double(audio.count) / 16000)
+                if b > a { audio += samples[a..<b] }
+            }
+            guard audio.count > 1600 else { continue }
+            let f = tmp.appendingPathComponent("\(wi).wav")
+            try WAV.write(audio[...], to: f)
+            let piece = try transcribeTurn(f, speaker: units[w[0]].spk, langState: &langState, config: config)
+            for (k, text) in split(piece, offsets: offsets, total: Double(audio.count) / 16000).enumerated() {
+                let u = units[w[k]]
+                if text.isEmpty || Transcriber.isLikelyHallucination(text, duration: u.end - u.start) || Transcriber.isRepetitive(text) { continue }
+                segments.append(Segment(start: u.start, end: u.end, speaker: u.spk, text: text, language: piece.language))
+            }
         }
 
         m.segments = dropEchoes(segments).sorted { $0.start < $1.start }
         m.duration = max(m.duration, [mic, sys, single].map { WAV.duration($0) }.max() ?? 0)
         progress("Done", 1)
         return m
+    }
+
+    static let gap = 0.6
+    static let maxWindow = 28.0
+
+    /// Groups turns (source, speaker, duration) into windows of one speaker from one file, ≤ 28 s of audio each,
+    /// in time order. Fewer, fuller whisper calls: each call costs a fixed 30 s encoder pass no matter how short the audio.
+    /// One speaker per window keeps one language per call, so the code-switch translation bug (spikes §B) cannot come back.
+    public static func batch(_ turns: [(src: String, spk: String, dur: Double)]) -> [[Int]] {
+        var open: [String: [Int]] = [:], openLen: [String: Double] = [:], out: [[Int]] = []
+        for (i, t) in turns.enumerated() {
+            let key = t.src + "|" + t.spk
+            if let cur = open[key], openLen[key]! + gap + t.dur + 0.3 > maxWindow { out.append(cur); open[key] = nil; openLen[key] = nil }
+            openLen[key, default: 0] += t.dur + 0.3 + (open[key] == nil ? 0 : gap)
+            open[key, default: []].append(i)
+        }
+        out += open.values
+        return out.sorted { $0[0] < $1[0] }
+    }
+
+    /// Gives each turn in a window its own words, by word mid-time. Falls back to the whole text for a 1-turn window.
+    public static func split(_ p: TranscriptPiece, offsets: [Double], total: Double) -> [String] {
+        if offsets.count == 1 { return [p.text] }
+        var parts = [String](repeating: "", count: offsets.count)
+        for w in p.words {
+            let token = w.word
+            if token.hasPrefix("[") || token.trimmingCharacters(in: .whitespaces).isEmpty { continue }
+            let mid = (w.start + w.end) / 2
+            let k = (offsets.lastIndex { $0 <= mid + 0.05 }) ?? 0
+            parts[k] += token
+        }
+        return parts.map { Transcriber.cleanText($0) }
     }
 
     /// Per-speaker language lock: language detection costs a second encoder pass (~1.7 s per call on M2),

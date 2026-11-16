@@ -89,7 +89,11 @@ public final class WhisperServer {
     deinit { process?.terminate() }
 }
 
-public struct TranscriptPiece { public var text: String; public var language: String?; public var noSpeech: Double; public var avgLogprob: Double }
+public struct TimedWord { public var start: Double; public var end: Double; public var word: String }
+public struct TranscriptPiece {
+    public var text: String; public var language: String?; public var noSpeech: Double; public var avgLogprob: Double
+    public var words: [TimedWord] = []
+}
 
 public enum Transcriber {
     /// Transcribes one short WAV file (≤ ~30 s) with per-call language detection.
@@ -114,7 +118,14 @@ public enum Transcriber {
         let avgLogprob = lps.isEmpty ? 0 : lps.reduce(0, +) / Double(lps.count)
         let text = cleanText((j["text"] as? String) ?? "")
         let lang = (j["detected_language"] as? String) ?? (j["language"] as? String)
-        return TranscriptPiece(text: text, language: language == "auto" ? lang.map(langCode) : language, noSpeech: noSpeech, avgLogprob: avgLogprob)
+        let words: [TimedWord] = segs.flatMap { seg in
+            ((seg["words"] as? [[String: Any]]) ?? []).compactMap { w in
+                guard let t = w["word"] as? String, let a = w["start"] as? Double, let b = w["end"] as? Double else { return nil }
+                return TimedWord(start: a, end: b, word: t)
+            }
+        }
+        return TranscriptPiece(text: text, language: language == "auto" ? lang.map(langCode) : language, noSpeech: noSpeech,
+                               avgLogprob: avgLogprob, words: words)
     }
 
     public static func cleanText(_ s: String) -> String {

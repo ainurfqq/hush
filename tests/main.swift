@@ -122,6 +122,20 @@ test("Per-speaker language lock engages after 3 agreeing turns, releases on chan
     expect(l.language(for: "spk9", configured: "en") == "en", "explicit config wins")
 }
 
+test("Pipeline.batch groups one speaker's turns into ≤ 28 s windows, in time order") {
+    let turns = [("a", "spk1", 10.0), ("a", "spk2", 5.0), ("a", "spk1", 10.0), ("a", "spk2", 5.0), ("a", "spk1", 10.0), ("b", "me", 3.0)]
+    let w = Pipeline.batch(turns.map { (src: $0.0, spk: $0.1, dur: $0.2) })
+    expect(w == [[0, 2], [1, 3], [4], [5]], "\(w)")
+}
+
+test("Pipeline.split gives each turn its words by time") {
+    let p = TranscriptPiece(text: "Halo semua. Apa kabar?", language: "id", noSpeech: 0, avgLogprob: 0, words: [
+        TimedWord(start: 0.1, end: 0.4, word: " Halo"), TimedWord(start: 0.4, end: 0.9, word: " semua."),
+        TimedWord(start: 5.2, end: 5.5, word: " Apa"), TimedWord(start: 5.5, end: 5.9, word: " kabar?")])
+    expect(Pipeline.split(p, offsets: [0, 5.0], total: 7) == ["Halo semua.", "Apa kabar?"], "\(Pipeline.split(p, offsets: [0, 5.0], total: 7))")
+    expect(Pipeline.split(p, offsets: [0], total: 7) == ["Halo semua. Apa kabar?"], "single turn keeps whole text")
+}
+
 test("Transcriber.cleanText strips silence tokens and whitespace") {
     expect(Transcriber.cleanText("  Halo\n dunia [BLANK_AUDIO] ") == "Halo dunia", Transcriber.cleanText("  Halo\n dunia [BLANK_AUDIO] "))
     expect(Transcriber.isLikelyHallucination("Terima kasih telah menonton!", duration: 2), "known outro")
