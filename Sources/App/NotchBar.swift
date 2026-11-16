@@ -7,9 +7,14 @@ import Combine
 /// Hidden from standard screen capture like the floating prompter (sharingType = .none).
 final class NotchState: ObservableObject {
     enum Mode { case collapsed, hover, question }
-    @Published var mode: Mode = .collapsed
+    @Published var mode: Mode = .collapsed { didSet { if mode != .collapsed { lastOpen = mode } } }
+    /// The open content stays laid out while the shape closes over it (drawer effect).
+    @Published var lastOpen: Mode = .hover
+    @Published var contentHeight: CGFloat = 0
     @Published var pinned = false
     var hovering = false
+    /// Size of the black shape (reported by the view); the rest of the window lets clicks through.
+    var shapeSize = CGSize(width: 300, height: 32)
 }
 
 enum NotchGeometry {
@@ -59,26 +64,45 @@ final class NotchController {
     init(model: AppModel) {
         self.model = model
         host = NSHostingView(rootView: AnyView(NotchView().environmentObject(model).environmentObject(state)))
+        host.wantsLayer = true; host.layer?.backgroundColor = NSColor.clear.cgColor
         panel.contentView = host
+        panel.ignoresMouseEvents = false
         NotchController.current = self
-        state.$mode.receive(on: DispatchQueue.main).sink { [weak self] _ in self?.relayout() }.store(in: &bag)
-        model.objectWillChange.receive(on: DispatchQueue.main).sink { [weak self] _ in
-            DispatchQueue.main.async { self?.relayout() }
-        }.store(in: &bag)
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
             .sink { [weak self] _ in self?.relayout() }.store(in: &bag)
     }
 
-    func show() { state.mode = .collapsed; relayout(); panel.orderFrontRegardless() }
-    func hide() { collapseWork?.cancel(); panel.orderOut(nil); state.mode = .collapsed; state.pinned = false }
+    private var mouseTimer: Timer?
+
+    func show() {
+        state.mode = .collapsed; relayout(); panel.orderFrontRegardless()
+        panel.ignoresMouseEvents = true
+        mouseTimer?.invalidate()
+        // 30 times a second: accept the mouse only over the black shape, pass it through everywhere else.
+        mouseTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in self?.updateMousePassThrough() }
+    }
+    func hide() {
+        collapseWork?.cancel(); mouseTimer?.invalidate(); mouseTimer = nil
+        panel.orderOut(nil); state.mode = .collapsed; state.pinned = false
+    }
+
+    private func updateMousePassThrough() {
+        let f = panel.frame, s = state.shapeSize
+        let shape = NSRect(x: f.midX - s.width / 2, y: f.maxY - s.height, width: s.width, height: s.height).insetBy(dx: -4, dy: -4)
+        let inside = shape.contains(NSEvent.mouseLocation)
+        if panel.ignoresMouseEvents == inside { panel.ignoresMouseEvents = !inside }
+    }
     var isVisible: Bool { panel.isVisible }
 
-    /// Fits the window to the SwiftUI content, top-centered on the notch, so empty space never blocks clicks.
+    /// The window has ONE fixed size (big enough for the open states) and never resizes: resizing a window while
+    /// SwiftUI animates its content looked jumpy, and made macOS report hover exit/enter (open/close flicker).
+    /// Only the black shape inside animates. The clear area around it lets clicks pass through.
+    static let canvas = NSSize(width: 560, height: 300)
     func relayout() {
-        let size = host.fittingSize
         let (_, cx) = NotchGeometry.notch
         let top = NotchGeometry.screen.frame.maxY
-        panel.setFrame(NSRect(x: (cx - size.width / 2).rounded(), y: top - size.height, width: size.width, height: size.height), display: true)
+        let w = Self.canvas.width, h = Self.canvas.height
+        panel.setFrame(NSRect(x: (cx - w / 2).rounded(), y: top - h, width: w, height: h), display: false)
     }
 
     func hoverChanged(_ on: Bool) {
@@ -87,7 +111,7 @@ final class NotchController {
             collapseWork?.cancel()
             if state.mode == .collapsed { state.mode = .hover }
         } else if state.mode == .hover || (state.mode == .question && !state.pinned && autoCloseDue) {
-            schedule(after: 0.35)
+            schedule(after: 0.45)
         }
     }
 
@@ -105,6 +129,7 @@ final class NotchController {
 
     func collapse(force: Bool = false) {
         guard force || (!state.pinned && !state.hovering) else { return }
+        guard state.mode != .collapsed else { return }
         if force { state.pinned = false }
         state.mode = .collapsed
     }
@@ -127,15 +152,13 @@ struct NotchView: View {
 
     var notchW: CGFloat { NotchGeometry.notch.width }
     var barH: CGFloat { NotchGeometry.barHeight }
-    var width: CGFloat {
-        switch st.mode {
-        case .collapsed: return (notchW > 0 ? notchW : 120) + 2 * 92
-        case .hover: return max(notchW + 120, 460)
-        case .question: return max(notchW + 120, 480)
-        }
-    }
+    var collapsedWidth: CGFloat { (notchW > 0 ? notchW : 120) + 2 * 92 }
+    func openWidth(_ m: NotchState.Mode) -> CGFloat { m == .question ? max(notchW + 120, 480) : max(notchW + 120, 460) }
+    var isOpen: Bool { st.mode != .collapsed }
+    var shown: NotchState.Mode { isOpen ? st.mode : st.lastOpen }
 
     var body: some View {
+        let w = isOpen ? openWidth(st.mode) : collapsedWidth
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 HStack(spacing: 7) {
@@ -146,20 +169,33 @@ struct NotchView: View {
                 Spacer(minLength: notchW > 0 ? notchW : 120)
                 meter.frame(width: 92)
             }
-            .frame(height: barH)
+            .frame(width: w, height: barH)
 
-            if st.mode == .hover { hoverContent.transition(.opacity) }
-            if st.mode == .question { questionContent.transition(.opacity) }
+            // Always laid out at its open width; the shape's height reveals or hides it like a drawer.
+            Group { if shown == .question { questionContent } else { hoverContent } }
+                .frame(width: openWidth(shown))
+                .fixedSize(horizontal: false, vertical: true)
+                .background(GeometryReader { g in
+                    Color.clear.onAppear { st.contentHeight = g.size.height }
+                        .onChange(of: g.size.height) { _, v in st.contentHeight = v }
+                })
+                .opacity(isOpen ? 1 : 0)
+                .animation(isOpen ? .easeOut(duration: 0.2).delay(0.06) : .easeIn(duration: 0.1), value: isOpen)
         }
-        .frame(width: width)
+        .frame(width: w, height: barH + (isOpen ? st.contentHeight : 0), alignment: .top)
+        .clipped()
         .background(
-            UnevenRoundedRectangle(cornerRadii: .init(topLeading: 0, bottomLeading: st.mode == .collapsed ? 14 : 22,
-                                                      bottomTrailing: st.mode == .collapsed ? 14 : 22, topTrailing: 0))
+            UnevenRoundedRectangle(cornerRadii: .init(topLeading: 0, bottomLeading: isOpen ? 22 : 14,
+                                                      bottomTrailing: isOpen ? 22 : 14, topTrailing: 0))
                 .fill(Color(red: 0.043, green: 0.043, blue: 0.051))
         )
-        .contentShape(Rectangle())
+        .contentShape(UnevenRoundedRectangle(cornerRadii: .init(topLeading: 0, bottomLeading: 22, bottomTrailing: 22, topTrailing: 0)))
         .onHover { NotchController.current?.hoverChanged($0) }
-        .animation(.easeOut(duration: 0.16), value: st.mode)
+        .background(GeometryReader { g in
+            Color.clear.onAppear { st.shapeSize = g.size }.onChange(of: g.size) { _, v in st.shapeSize = v }
+        })
+        .frame(width: NotchController.canvas.width, height: NotchController.canvas.height, alignment: .top)
+        .animation(reduceMotion ? .easeOut(duration: 0.12) : .spring(response: 0.38, dampingFraction: 0.86), value: st.mode)
         .environment(\.colorScheme, .dark)
     }
 
