@@ -23,6 +23,9 @@ curl -fsSL -H "Authorization: Bearer $(gh auth token)" -o "$TMP/src.tar.gz" "$UR
 SHA="$(shasum -a 256 "$TMP/src.tar.gz" | awk '{print $1}')"
 
 gh repo clone "$TAP" "$TMP/tap" -- -q
+# Commit to the tap with this repo's identity (the GitHub noreply address), never the global git email.
+git -C "$TMP/tap" config user.name "$(git config user.name)"
+git -C "$TMP/tap" config user.email "$(git config user.email)"
 mkdir -p "$TMP/tap/Formula"
 sed -e "s|@VERSION@|$V|g" -e "s|@SHA256@|$SHA|g" packaging/homebrew/hush.rb.in > "$TMP/tap/Formula/hush.rb"
 ( cd "$TMP/tap" && git add Formula/hush.rb && git commit -qm "hush $V" && git push -q )
