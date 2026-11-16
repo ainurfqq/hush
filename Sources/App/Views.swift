@@ -14,20 +14,20 @@ struct MenuContent: View {
             if let e = model.lastError {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(e).font(.caption).foregroundStyle(Theme.rec).lineLimit(4)
-                    Button("Dismiss") { model.lastError = nil }.buttonStyle(.link).font(.caption)
+                    Button("Dismiss") { model.lastError = nil }.buttonStyle(LinkStyle()).font(.caption)
                 }
             }
             Divider()
             HStack {
-                Button("Open notes") { open("library") }.buttonStyle(.link)
+                Button("Open notes") { open("library") }.buttonStyle(LinkStyle())
                 Spacer()
-                Button("Copy consent message") { model.copyConsent() }.buttonStyle(.link)
+                Button("Copy consent message") { model.copyConsent() }.buttonStyle(LinkStyle())
                 Spacer()
-                Button("Settings") { open("settings") }.buttonStyle(.link)
+                Button("Settings") { open("settings") }.buttonStyle(LinkStyle())
             }.font(.system(size: 12, weight: .medium)).tint(Theme.indigo)
             HStack {
                 Spacer()
-                Button("Quit Hush") { NSApp.terminate(nil) }.buttonStyle(.link).font(.caption).foregroundStyle(Theme.ink3)
+                Button("Quit Hush") { NSApp.terminate(nil) }.buttonStyle(LinkStyle(color: Theme.ink3)).font(.caption)
             }
         }
         .padding(16)
@@ -69,7 +69,7 @@ struct MenuContent: View {
             VStack(alignment: .leading, spacing: 2) {
                 Button { model.togglePrompter() } label: {
                     Text("Prompter ").font(.system(size: 13, weight: .semibold)) + Text(model.prompterVisible ? "on · ⌃⌥H" : "off · ⌃⌥H").font(.system(size: 13)).foregroundColor(Theme.ink3)
-                }.buttonStyle(.plain)
+                }.buttonStyle(LinkStyle(color: Theme.ink))
                 hiddenStatus
             }
             Spacer()
@@ -86,8 +86,8 @@ struct MenuContent: View {
                             Text(m.title).font(Theme.serif(17)).lineLimit(1)
                             Spacer()
                             Text("\(formatTime(m.duration)) · \(m.summary?.actionItems.count ?? 0) tasks").font(.system(size: 12)).foregroundStyle(Theme.ink3)
-                        }.contentShape(Rectangle())
-                    }.buttonStyle(.plain)
+                        }.padding(.horizontal, 6).padding(.vertical, 5).contentShape(Rectangle())
+                    }.buttonStyle(RowStyle())
                 }
             }
         }
@@ -95,13 +95,18 @@ struct MenuContent: View {
 
     @ViewBuilder var hiddenStatus: some View {
         let parts = model.config.lastHiddenCheck.split(separator: "|").map(String.init)
-        if let h = model.hiddenCheck {
+        if model.needsScreenPermission {
+            HStack(spacing: 6) {
+                Text("Needs Screen Recording permission").font(.system(size: 12)).foregroundStyle(Theme.ink3)
+                Button("Open Settings") { model.openScreenRecordingSettings() }.buttonStyle(LinkStyle()).font(.system(size: 12))
+            }
+        } else if let h = model.hiddenCheck {
             Text(h).font(.system(size: 11)).foregroundStyle(h.hasPrefix("Hidden") ? Theme.ok : Theme.rec).lineLimit(3)
         } else if parts.count == 2 {
             Text(parts[0] == "hidden" ? "Hidden from screen capture · checked \(parts[1])" : "Visible in screen capture! · \(parts[1])")
                 .font(.system(size: 12)).foregroundStyle(parts[0] == "hidden" ? Theme.ok : Theme.rec)
         } else {
-            Button("Check it is hidden from screen share") { model.checkPrompterHidden() }.buttonStyle(.link).font(.system(size: 12)).tint(Theme.indigo)
+            Button("Check it is hidden from screen share") { model.checkPrompterHidden() }.buttonStyle(LinkStyle()).font(.system(size: 12)).tint(Theme.indigo)
         }
     }
 
@@ -160,24 +165,6 @@ struct LevelRow: View {
     }
 }
 
-struct FilledButton: ButtonStyle {
-    var bg: Color
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label.font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
-            .padding(.horizontal, 12).padding(.vertical, 6)
-            .background(bg.opacity(configuration.isPressed ? 0.85 : 1), in: RoundedRectangle(cornerRadius: 10))
-    }
-}
-
-struct OutlineButton: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label.font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.ink)
-            .padding(.horizontal, 12).padding(.vertical, 6)
-            .background(Color.white.opacity(configuration.isPressed ? 0.7 : 1), in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.line))
-    }
-}
-
 // MARK: live meeting window
 
 struct LiveWindow: View {
@@ -225,11 +212,8 @@ struct LiveWindow: View {
 
     func tabButton(_ title: String, _ i: Int) -> some View {
         Button { tab.index = i } label: {
-            VStack(spacing: 8) {
-                Text(title).font(.system(size: 14, weight: tab.index == i ? .semibold : .medium)).foregroundStyle(tab.index == i ? Theme.ink : Theme.ink2)
-                Rectangle().fill(tab.index == i ? Theme.indigo : .clear).frame(height: 2)
-            }.fixedSize()
-        }.buttonStyle(.plain)
+            Text(title).font(.system(size: 14, weight: tab.index == i ? .semibold : .medium))
+        }.buttonStyle(TabStyle(selected: tab.index == i))
     }
 
     var notes: some View {
@@ -282,7 +266,7 @@ struct LiveWindow: View {
                 Text("What you ").font(Theme.serif(22)) + Text("missed").font(Theme.serif(22, italic: true))
                 Text("last 5 minutes").font(.system(size: 12)).foregroundStyle(Theme.ink3)
                 Spacer()
-                if !model.catchUpBusy { Button("Close") { model.catchUp = [] }.buttonStyle(.link).font(.caption).tint(Theme.indigo) }
+                if !model.catchUpBusy { Button("Close") { model.catchUp = [] }.buttonStyle(LinkStyle()).font(.caption).tint(Theme.indigo) }
             }
             if model.catchUpBusy { ProgressView().controlSize(.small) }
             ForEach(model.catchUp, id: \.self) { b in
@@ -309,7 +293,7 @@ struct LiveWindow: View {
         VStack(spacing: 10) {
             HStack(spacing: 4) {
                 Text("Tell everyone you are taking notes.").foregroundStyle(Theme.ink3)
-                Button("Copy consent message") { model.copyConsent() }.buttonStyle(.link).tint(Theme.indigo)
+                Button("Copy consent message") { model.copyConsent() }.buttonStyle(LinkStyle()).tint(Theme.indigo)
             }.font(.system(size: 12))
             HStack(spacing: 8) {
                 if model.isRecording {
@@ -394,7 +378,7 @@ struct LibraryView: View {
             }
             Spacer(minLength: 0)
             HStack {
-                Button { model.importAudio() } label: { Label("Import audio", systemImage: "square.and.arrow.down") }.buttonStyle(.link).tint(Theme.ink2)
+                Button { model.importAudio() } label: { Label("Import audio", systemImage: "square.and.arrow.down") }.buttonStyle(LinkStyle(color: Theme.ink2))
                 Spacer()
             }.font(.system(size: 12))
             let open = model.meetings.reduce(0) { $0 + ($1.summary?.actionItems.filter { !$0.done }.count ?? 0) }
@@ -430,9 +414,8 @@ struct LibraryView: View {
                 }
             }
             .padding(10).frame(maxWidth: .infinity, alignment: .leading)
-            .background(selected ? Theme.rgb(0xE9E5DC) : .clear, in: RoundedRectangle(cornerRadius: 8))
             .contentShape(Rectangle())
-        }.buttonStyle(.plain)
+        }.buttonStyle(RowStyle(selected: selected))
     }
 }
 
@@ -476,20 +459,17 @@ struct MeetingDetail: View {
                             Pill(text: "\(meeting.displayName(spk)) · \(meeting.segments.filter { $0.speaker == spk }.count) ✎",
                                  fg: [Theme.rgb(0x2B2B8A), Theme.rgb(0x7A3E06), Theme.ok, Theme.ink2][i % 4],
                                  bg: [Theme.rgb(0xE6E6FB), Theme.rgb(0xFCEBD9), Theme.okSoft, Theme.chip][i % 4])
-                        }.buttonStyle(.plain)
+                        }.buttonStyle(ChipStyle()).help("Rename speakers")
                     }
                 }
                 HStack(spacing: 22) {
                     ForEach(Array(tabs.enumerated()), id: \.offset) { i, t in
                         Button { st.tab = i } label: {
-                            VStack(spacing: 8) {
-                                HStack(spacing: 6) {
-                                    Text(t).font(.system(size: 14, weight: st.tab == i ? .semibold : .medium)).foregroundStyle(st.tab == i ? Theme.ink : Theme.ink2)
-                                    if t == "Tasks", let n = meeting.summary?.actionItems.count, n > 0 { Pill(text: "\(n)") }
-                                }
-                                Rectangle().fill(st.tab == i ? Theme.indigo : .clear).frame(height: 2)
-                            }.fixedSize()
-                        }.buttonStyle(.plain)
+                            HStack(spacing: 6) {
+                                Text(t).font(.system(size: 14, weight: st.tab == i ? .semibold : .medium))
+                                if t == "Tasks", let n = meeting.summary?.actionItems.count, n > 0 { Pill(text: "\(n)") }
+                            }
+                        }.buttonStyle(TabStyle(selected: st.tab == i))
                     }
                 }.padding(.top, 6)
             }
@@ -615,12 +595,13 @@ struct SetupView: View {
                         .labelsHidden().onChange(of: model.config.provider) { _ in model.saveConfig() }
                 }.padding(14).background(Color.white, in: RoundedRectangle(cornerRadius: 12)).overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
                 step(model.config.lastHiddenCheck.hasPrefix("hidden"), "Prompter hidden from screen share",
-                     model.hiddenCheck ?? "One-click test on your Mac, about 3 seconds", action: ("Run check", { model.checkPrompterHidden() }))
+                     model.hiddenCheck ?? "One-click test on your Mac, about 3 seconds",
+                     action: model.needsScreenPermission ? ("Open Settings", { model.openScreenRecordingSettings() }) : ("Run check", { model.checkPrompterHidden() }))
             }
             VStack(alignment: .leading, spacing: 8) {
                 Text("Tell people you are taking notes").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.rgb(0x6B4205))
                 Text("“\(AppModel.consentMessage)”").font(.system(size: 13)).foregroundStyle(Theme.rgb(0x4D3A1F)).fixedSize(horizontal: false, vertical: true)
-                Button("Copy message") { model.copyConsent() }.buttonStyle(.link).tint(Theme.indigo).font(.system(size: 13))
+                Button("Copy message") { model.copyConsent() }.buttonStyle(LinkStyle()).tint(Theme.indigo).font(.system(size: 13))
             }.padding(14).background(Theme.rgb(0xFFF7EB), in: RoundedRectangle(cornerRadius: 12)).overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.rgb(0xF3DDB6)))
             HStack {
                 Spacer()

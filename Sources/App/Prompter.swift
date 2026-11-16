@@ -72,7 +72,7 @@ struct PrompterView: View {
                                 Text("“\(q)”").font(.system(size: 12)).lineLimit(1).foregroundStyle(.white)
                                     .padding(.horizontal, 10).padding(.vertical, 6)
                                     .background(Color.white.opacity(0.08), in: Capsule()).overlay(Capsule().stroke(Color.white.opacity(0.18)))
-                            }.buttonStyle(.plain)
+                            }.buttonStyle(ChipStyle(dark: true)).help("Answer this question instead")
                         }
                     }
                 }
@@ -86,7 +86,7 @@ struct PrompterView: View {
                 Button { model.answerLastQuestion() } label: {
                     Text("Again ⌃⌥A").font(.system(size: 12)).foregroundStyle(.white).padding(.horizontal, 10).padding(.vertical, 5)
                         .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
-                }.buttonStyle(.plain).help("Answer the last question from others now")
+                }.buttonStyle(ChipStyle(dark: true)).help("Answer the last question from others now")
                 Slider(value: Binding(get: { model.config.prompterOpacity }, set: { model.setOpacity($0) }), in: 0.3...1)
                     .frame(width: 64).controlSize(.mini).help("Opacity")
             }

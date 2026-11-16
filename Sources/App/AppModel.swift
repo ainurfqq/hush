@@ -217,6 +217,10 @@ final class AppModel: ObservableObject {
     var prompterWindowNumber: Int? { panel?.windowNumber }
 
     @Published var hiddenCheck: String?
+    @Published var needsScreenPermission = false
+    func openScreenRecordingSettings() {
+        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
+    }
     /// Runs the self-test that proves (or disproves) the prompter is hidden from ScreenCaptureKit on this Mac.
     func checkPrompterHidden(_ done: ((PrompterCheck.Result?) -> Void)? = nil) {
         showPrompter()
@@ -224,7 +228,13 @@ final class AppModel: ObservableObject {
         hiddenCheck = "Checking… (the prompter blinks twice)"
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             PrompterCheck.run(panel: p) { r, err in
-                self.hiddenCheck = r?.summary ?? err
+                if err == PrompterCheck.needsPermission {
+                    self.hiddenCheck = "Hush needs Screen Recording permission for this check (only to take the test screenshots). Turn on Hush in System Settings, then run the check again."
+                    self.needsScreenPermission = true
+                } else {
+                    self.hiddenCheck = r?.summary ?? err
+                    self.needsScreenPermission = false
+                }
                 if let r, r.valid {
                     let f = DateFormatter(); f.dateFormat = "d MMM yyyy"
                     self.config.lastHiddenCheck = (r.hidden ? "hidden" : "visible") + "|" + f.string(from: Date())

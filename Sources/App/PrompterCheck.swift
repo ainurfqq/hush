@@ -16,7 +16,14 @@ enum PrompterCheck {
         }
     }
 
+    static let needsPermission = "needs-screen-recording-permission"
+
     static func run(panel: NSPanel, completion: @escaping (Result?, String?) -> Void) {
+        // The check takes screenshots, so it needs Screen Recording (separate from the audio permission).
+        guard CGPreflightScreenCaptureAccess() else {
+            CGRequestScreenCaptureAccess()      // shows the macOS prompt the first time, or adds Hush to the list
+            completion(nil, needsPermission); return
+        }
         guard let screen = panel.screen ?? NSScreen.main,
               let displayID = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID else {
             completion(nil, "No screen found"); return
@@ -58,7 +65,8 @@ enum PrompterCheck {
                 let hidden = shown * 2 < toPanel
                 await MainActor.run { completion(Result(hidden: hidden, valid: valid, noise: noise, shown: shown, control: control), nil) }
             } catch {
-                await MainActor.run { panel.sharingType = original; completion(nil, "\(error). Allow Hush under System Settings → Privacy & Security → Screen & System Audio Recording to run this check.") }
+                let denied = (error as NSError).code == -3801
+                await MainActor.run { panel.sharingType = original; completion(nil, denied ? needsPermission : "The check could not run: \(error.localizedDescription)") }
             }
         }
     }
