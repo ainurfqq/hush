@@ -17,7 +17,9 @@ struct HushApp: App {
         Window("Hush", id: "library") { LibraryView().environmentObject(AppDelegate.model) }
         Window("Hush Live", id: "live") { LiveWindow().environmentObject(AppDelegate.model) }
             .defaultSize(width: 640, height: 780)
-        Window("Set up Hush", id: "setup") { SetupView().environmentObject(AppDelegate.model) }
+        Window("Welcome to Hush", id: "setup") { OnboardingView().environmentObject(AppDelegate.model) }
+            .windowResizability(.contentSize)
+        Window("Free AI with ChatGPT", id: "codex") { CodexGuideView().environmentObject(AppDelegate.model) }
             .windowResizability(.contentSize)
         Window("Free AI on this Mac", id: "ollama") { OllamaGuideView().environmentObject(AppDelegate.model) }
             .windowResizability(.contentSize)
@@ -99,10 +101,20 @@ enum TestHooks {
         if let i = argv.firstIndex(of: "--open"), i + 1 < argv.count {
             let id = argv[i + 1]
             if let j = argv.firstIndex(of: "--select"), j + 1 < argv.count { m.libSelection = argv[j + 1] }
+            if let j = argv.firstIndex(of: "--step"), j + 1 < argv.count, let n = Int(argv[j + 1]) { OnboardingState.shared.step = n }
             if let j = argv.firstIndex(of: "--tab"), j + 1 < argv.count, let t = Int(argv[j + 1]), let id = m.libSelection,
                let mt = m.meetings.first(where: { $0.id == id }) { m.detailState(mt).tab = t }
             if argv.contains("--recording-look") { m.isRecording = true; m.elapsed = 768; m.micLevel = 0.04; m.sysLevel = 0.09 }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { m.openWindowAction?(id) }
+        }
+        if argv.contains("--perm-test") {
+            let t = PermissionTest.shared
+            t.run()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 13) {
+                print(String(format: "PERM_TEST done=%@ mic=%.3f call=%.3f heardMic=%@ heardCall=%@ meetingsLeft=%d", "\(t.done)", t.micPeak, t.sysPeak, "\(t.heardMic)", "\(t.heardCall)",
+                             Store.all().filter { $0.title == "Hush setup test" }.count))
+                fflush(stdout); exit(0)
+            }
         }
         if argv.contains("--verify-hidden") {
             m.prompterQuestion = "Self-test"; m.prompterAnswer = "Hush prompter self-test: this text must not appear in screen captures."

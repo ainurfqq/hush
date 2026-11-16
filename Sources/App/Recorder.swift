@@ -37,7 +37,7 @@ final class Recorder {
         _ = try Store.create(Meeting(id: meetingID, title: title, source: mode == .call ? "live" : "mic", audioFiles: files, status: .recording))
     }
 
-    func start(echoCancel: Bool = true) throws {
+    func start(echoCancel: Bool = true, warmASR: Bool = true) throws {
         let dir = Store.folder(meetingID)
         micWriter = try WAVStreamWriter(url: dir.appendingPathComponent("mic.wav"))
         mic.echoCancel = echoCancel && mode == .call && ProcessInfo.processInfo.environment["HUSH_NO_AEC"] != "1"
@@ -51,7 +51,7 @@ final class Recorder {
             catch { mic.stop(); throw error }
         }
         started = Date()
-        DispatchQueue.global().async { _ = try? WhisperServer.shared.ensureRunning(live: true) }
+        if warmASR { DispatchQueue.global().async { _ = try? WhisperServer.shared.ensureRunning(live: true) } }
     }
 
     private func ingest(_ s: [Float], system: Bool) {

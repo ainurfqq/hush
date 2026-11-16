@@ -636,70 +636,6 @@ struct MeetingDetail: View {
 
 // MARK: first run
 
-struct SetupView: View {
-    @EnvironmentObject var model: AppModel
-    @Environment(\.dismissWindow) var dismissWindow
-    @ObservedObject var st = SetupState.shared
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HushGlyph.onLight.frame(width: 48, height: 44)
-            (Text("Set up ").font(Theme.serif(40)) + Text("Hush").font(Theme.serif(40, italic: true)))
-            Text("Hush runs on this Mac only. Five quick checks, then you can record.").font(.system(size: 14)).foregroundStyle(Theme.ink2)
-            VStack(spacing: 10) {
-                step(st.engines, "Speech engine and models", st.enginesDetail, action: nil)
-                step(st.mic, "Microphone", "For your side of the call, or the whole room", action: st.mic ? nil : ("Allow", { MicCapture.requestAccess { _ in st.refresh() } }))
-                step(st.callAudioTried, "Call audio", "macOS asks the first time you record a call. Click Allow then.", action: nil, optional: true)
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack { icon(model.config.provider != .none); Text("AI for summaries and answers (optional)").font(.system(size: 14, weight: .semibold)); Spacer() }
-                    if let d = model.aiDetect { Text(d).font(.system(size: 12)).foregroundStyle(Theme.ink3) }
-                    Picker("Use", selection: $model.config.provider) { ForEach(ProviderKind.allCases, id: \.self) { Text($0.label).tag($0) } }
-                        .labelsHidden().onChange(of: model.config.provider) { _ in model.saveConfig() }
-                    Button("Set up free AI on this Mac (Ollama)…") { model.openWindowAction?("ollama") }.buttonStyle(LinkStyle()).font(.system(size: 12))
-                    if model.config.provider == .none {
-                        Text("Without AI, Hush still records, transcribes, labels speakers, finds tasks and searches. The prompter shows matching points from your notes file. For written summaries and answers, install Claude Code or the free Ollama (best on 16 GB Macs).")
-                            .font(.system(size: 12)).foregroundStyle(Theme.ink2).fixedSize(horizontal: false, vertical: true)
-                    }
-                }.padding(14).background(Color.white, in: RoundedRectangle(cornerRadius: 12)).overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
-                step(model.config.lastHiddenCheck.hasPrefix("hidden"), "Prompter hidden from screen share",
-                     model.hiddenCheck ?? "One-click test on your Mac, about 3 seconds",
-                     action: model.needsScreenPermission ? ("Open Settings", { model.openScreenRecordingSettings() }) : ("Run check", { model.checkPrompterHidden() }))
-            }
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Tell people you are taking notes").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.rgb(0x6B4205))
-                Text("“\(AppModel.consentMessage)”").font(.system(size: 13)).foregroundStyle(Theme.rgb(0x4D3A1F)).fixedSize(horizontal: false, vertical: true)
-                Button("Copy message") { model.copyConsent() }.buttonStyle(LinkStyle()).tint(Theme.indigo).font(.system(size: 13))
-            }.padding(14).background(Theme.rgb(0xFFF7EB), in: RoundedRectangle(cornerRadius: 12)).overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.rgb(0xF3DDB6)))
-            HStack {
-                Spacer()
-                Button { model.config.setupDone = true; model.saveConfig(); dismissWindow(id: "setup") } label: {
-                    Text("Start using Hush").padding(.horizontal, 20).frame(minHeight: 40)
-                }.buttonStyle(FilledButton(bg: Theme.ink))
-            }
-        }
-        .padding(32).frame(width: 560).background(Theme.panel).tint(Theme.indigo)
-        .onAppear { st.refresh() }
-    }
-
-    func icon(_ done: Bool) -> some View {
-        Image(systemName: done ? "checkmark.circle.fill" : "circle").font(.system(size: 20)).foregroundStyle(done ? Theme.ok : Theme.ink3)
-    }
-
-    func step(_ done: Bool, _ title: String, _ detail: String, action: (String, () -> Void)?, optional: Bool = false) -> some View {
-        HStack(spacing: 12) {
-            icon(done)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.system(size: 14, weight: .semibold))
-                Text(detail).font(.system(size: 12)).foregroundStyle(Theme.ink3).fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer()
-            if let a = action { Button(a.0, action: a.1).buttonStyle(FilledButton(bg: Theme.indigo)).frame(height: 34) }
-        }
-        .padding(14).background(Color.white, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(done || optional ? Theme.line : Theme.indigo, lineWidth: done || optional ? 1 : 2))
-    }
-}
-
 final class SetupState: ObservableObject {
     static let shared = SetupState()
     @Published var engines = false
@@ -726,7 +662,11 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            Section("AI provider") {
+            Section("AI") {
+                AIChoiceCards()
+                Button("Open the welcome guide again") { OnboardingState.shared.step = 0; model.openWindowAction?("setup") }.buttonStyle(LinkStyle())
+            }
+            Section("AI provider details") {
                 Picker("Provider", selection: $model.config.provider) {
                     ForEach(ProviderKind.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
