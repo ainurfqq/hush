@@ -17,13 +17,13 @@ Status: v0.1, Apple Silicon, macOS 14.4+. Tested on an M2 with 8 GB RAM, macOS 2
 One command (needs [Homebrew](https://brew.sh); Apple's free Command Line Tools are installed if missing; no Xcode, no Apple account):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ainurfqq/hush/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/ainurfqq/hush-meetings/main/install.sh | bash
 ```
 
 While the repo is private, use the GitHub CLI (after `gh auth login`):
 
 ```bash
-gh api repos/ainurfqq/hush/contents/install.sh -H "Accept: application/vnd.github.raw" | bash
+gh api repos/ainurfqq/hush-meetings/contents/install.sh -H "Accept: application/vnd.github.raw" | bash
 ```
 
 The installer builds Hush from source, installs `~/Applications/Hush.app`, links the `hush` command
