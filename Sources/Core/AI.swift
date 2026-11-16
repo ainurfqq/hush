@@ -81,18 +81,30 @@ public struct CodexCLIProvider: AIProvider {
     public var name: String { "codex-cli" }
     public init(path: String = "", model: String = "") { self.path = path; self.model = model }
 
-    public func arguments() -> [String] {
+    /// Model every ChatGPT plan can use in the Codex CLI, Free included (tested 2026-11-16 with a Free account).
+    public static let chatGPTFallbackModel = "gpt-6-luna"
+
+    public func arguments(model override: String? = nil) -> [String] {
         var a = ["exec", "--skip-git-repo-check", "--sandbox", "read-only"]
-        if !model.isEmpty { a += ["--model", model] }
+        let m = override ?? model
+        if !m.isEmpty { a += ["--model", m] }
         a.append("-")   // read prompt from stdin
         return a
     }
 
     public func complete(system: String, user: String, fast: Bool) throws -> String {
         guard let exe = Shell.which("codex", override: path) else { throw HushError.missing("codex CLI (npm i -g @openai/codex, or set its path in Settings)") }
-        let r = try Shell.run(exe, arguments(), stdin: "\(system)\n\n\(user)", timeout: fast ? 90 : 300,
-                              env: home.isEmpty ? nil : ["CODEX_HOME": home],
-                              cwd: FileManager.default.temporaryDirectory.path)
+        func run(_ m: String?) throws -> ShellResult {
+            try Shell.run(exe, arguments(model: m), stdin: "\(system)\n\n\(user)", timeout: fast ? 90 : 300,
+                          env: home.isEmpty ? nil : ["CODEX_HOME": home], cwd: FileManager.default.temporaryDirectory.path)
+        }
+        var r = try run(nil)
+        // A ChatGPT login (e.g. the Free plan) rejects some models; retry once with the model every plan has.
+        if r.status != 0, (r.stderr + r.stdout).contains("not supported when using Codex with a ChatGPT account"),
+           model != Self.chatGPTFallbackModel {
+            Log.write("codex: model not allowed for this ChatGPT plan, retrying with \(Self.chatGPTFallbackModel)")
+            r = try run(Self.chatGPTFallbackModel)
+        }
         guard r.status == 0 else {
             let msg = [r.stderr, r.stdout].map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.first { !$0.isEmpty } ?? "no message"
             throw HushError.provider("codex exit \(r.status): \(msg.suffix(300)). If it says you are not logged in, run: codex login")

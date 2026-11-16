@@ -85,6 +85,22 @@ On 8 GB Macs, keep the prompter on a cloud provider (Claude Code CLI). A local m
 the speech engine during a live call made both slower in our tests. `prompterProvider` lets bigger Macs
 use a local model for the prompter only.
 
+## Free AI with a ChatGPT account (Codex CLI)
+
+A free OpenAI/ChatGPT account works. Tested on 2026-11-16 with a Free account and Codex CLI 0.169.0:
+`gpt-6-luna` answered (prompter answer 4.3 s, full meeting summary 21 s, task owners correct);
+`gpt-6.1-sol` and `gpt-5.5` were refused ("not supported when using Codex with a ChatGPT account").
+
+```bash
+npm i -g @openai/codex        # or: brew install --cask codex
+codex login                   # opens the browser, sign in with your ChatGPT account
+hush config set provider codex-cli
+hush config set model gpt-6-luna   # optional: Hush falls back to it by itself when your plan refuses a model
+```
+
+Hush uses your Codex login from `~/.codex` (or `CODEX_HOME`); no API key. Usage counts toward your
+ChatGPT plan's Codex limits, which OpenAI does not publish for the Free plan.
+
 ## Free AI on this Mac (Ollama)
 
 No AI subscription? Hush works without AI (recording, transcript, speakers, tasks, search; the prompter shows

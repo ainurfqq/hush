@@ -742,7 +742,7 @@ struct SettingsView: View {
                 if model.config.provider == .codexCLI {
                     TextField("codex command", text: $model.config.codexPath, prompt: Text("found automatically"))
                     TextField("Codex folder", text: $model.config.codexHome, prompt: Text("~/.codex (CODEX_HOME)"))
-                    Text("Uses your Codex login (run `codex login` once). Which ChatGPT plans include the Codex CLI: see OpenAI's Codex pricing page.")
+                    Text("Uses your Codex login (run `codex login` once). Works with a free ChatGPT account using the gpt-6-luna model; Hush switches to it automatically if your plan does not allow the default model.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 if model.config.provider == .openAICompatible || model.config.provider == .anthropic {
