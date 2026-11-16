@@ -642,6 +642,32 @@ final class SetupState: ObservableObject {
     @Published var enginesDetail = ""
     @Published var mic = false
     @Published var callAudioTried = false
+    @Published var downloading = false
+    @Published var downloadLine = ""
+
+    /// Runs the bundled fetch-engines.sh (pinned SHA-256) and shows its newest line.
+    func downloadModels() {
+        guard !downloading, let script = Bundle.main.resourceURL?.appendingPathComponent("fetch-engines.sh").path else { return }
+        downloading = true; downloadLine = "Starting…"
+        let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/bash"); p.arguments = [script]
+        var env = ProcessInfo.processInfo.environment; env["PATH"] = Shell.searchDirs.joined(separator: ":"); p.environment = env
+        let pipe = Pipe(); p.standardOutput = pipe; p.standardError = pipe
+        pipe.fileHandleForReading.readabilityHandler = { h in
+            let s = String(decoding: h.availableData, as: UTF8.self)
+            if let last = s.components(separatedBy: CharacterSet(charactersIn: "\r\n")).map({ $0.trimmingCharacters(in: .whitespaces) }).last(where: { !$0.isEmpty }) {
+                DispatchQueue.main.async { self.downloadLine = String(last.suffix(90)) }
+            }
+        }
+        p.terminationHandler = { proc in
+            pipe.fileHandleForReading.readabilityHandler = nil
+            DispatchQueue.main.async {
+                self.downloading = false
+                if proc.terminationStatus != 0 { self.downloadLine = "Download failed. Check the internet connection and try again." }
+                self.refresh()
+            }
+        }
+        do { try p.run() } catch { downloading = false; downloadLine = "Could not start the download: \(error.localizedDescription)" }
+    }
     func refresh() {
         let checks = Engines.check()
         engines = checks.allSatisfy { $0.1 }

@@ -19,6 +19,7 @@ USAGE
   hush config [get | set <key> <value>]                   e.g. hush config set provider claude-cli
   hush key <openai|anthropic> <value>                     store an API key in the macOS Keychain ("" deletes)
   hush setup                                              download engines + models (pinned SHA-256)
+  hush open                                               start the Hush app
 
 DATA  \(Paths.base.path)
 """
@@ -46,6 +47,24 @@ func summarize(_ m: inout Meeting) {
         try Store.save(m)
     } catch { fail("\(error)") }
 }
+
+/// Homebrew installs Hush.app inside its Cellar; put a link in ~/Applications so Spotlight and Launchpad find it.
+func linkAppIfHomebrew() {
+    let exe = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath().path
+    guard exe.contains("/Cellar/hush/") else { return }
+    let stable = "/opt/homebrew/opt/hush/Hush.app"
+    let app = FileManager.default.fileExists(atPath: stable) ? stable
+        : URL(fileURLWithPath: exe).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().path
+    let apps = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications")
+    let link = apps.appendingPathComponent("Hush.app")
+    guard (try? FileManager.default.destinationOfSymbolicLink(atPath: link.path)) == nil,
+          !FileManager.default.fileExists(atPath: link.path) else { return }
+    try? FileManager.default.createDirectory(at: apps, withIntermediateDirectories: true)
+    if (try? FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: app)) != nil {
+        FileHandle.standardError.write(Data("  linked \(link.path) → \(app)\n".utf8))
+    }
+}
+linkAppIfHomebrew()
 
 guard let cmd = args.first else { print(usage); exit(0) }
 args.removeFirst()
@@ -169,6 +188,12 @@ case "setup":
     guard let script = candidates.first(where: { FileManager.default.fileExists(atPath: $0) }) else { fail("fetch-engines.sh not found") }
     let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/bash"); p.arguments = [script]
     try? p.run(); p.waitUntilExit(); exit(p.terminationStatus)
+
+case "open":
+    let exe = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
+    let app = exe.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/open"); p.arguments = [app.path]
+    try? p.run(); p.waitUntilExit()
 
 case "help", "-h", "--help": print(usage)
 case "version", "--version": print(MCPServer.version)

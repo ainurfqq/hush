@@ -141,7 +141,10 @@ struct OnboardingView: View {
     @ViewBuilder var permissions: some View {
         title("Let Hush ", "listen")
         lead("macOS asks once for two permissions. Do it now, so nothing pops up during your first real meeting.")
-        card(done: setup.engines, title: "Speech engine and models", detail: setup.enginesDetail) { EmptyView() }
+        card(done: setup.engines, title: "Speech engine and models", detail: setup.downloading ? setup.downloadLine : setup.enginesDetail) {
+            if !setup.engines { Button(setup.downloading ? "Downloading…" : "Download (about 800 MB)") { setup.downloadModels() }
+                .buttonStyle(FilledButton(bg: Theme.indigo)).disabled(setup.downloading) }
+        }
         card(done: AVCaptureDeviceAuthorized(), title: "Microphone", detail: "For your side of the call, or the whole room.") {
             if !AVCaptureDeviceAuthorized() { Button("Allow") { MicCapture.requestAccess { _ in setup.refresh(); perm.objectWillChange.send() } }.buttonStyle(FilledButton(bg: Theme.indigo)) }
         }
