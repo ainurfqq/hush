@@ -20,12 +20,6 @@ One command (needs [Homebrew](https://brew.sh); Apple's free Command Line Tools 
 curl -fsSL https://raw.githubusercontent.com/ainurfqq/hush-meetings/main/install.sh | bash
 ```
 
-While the repo is private, use the GitHub CLI (after `gh auth login`):
-
-```bash
-gh api repos/ainurfqq/hush-meetings/contents/install.sh -H "Accept: application/vnd.github.raw" | bash
-```
-
 The installer builds Hush from source, installs `~/Applications/Hush.app`, links the `hush` command
 into `~/.local/bin`, installs `whisper.cpp` with Homebrew and downloads about 800 MB of models
 (each checked against a pinned SHA-256 in `scripts/engines.lock`).
@@ -79,7 +73,7 @@ hush config set provider none                # local rules only
 ```
 
 Only the transcript text you summarize or ask about is sent, and only to the provider you picked.
-Audio never leaves the Mac. Keys live in the macOS Keychain (service `id.roxst.hush`).
+Audio never leaves the Mac. Keys live in the macOS Keychain (service `app.airo.hush`).
 
 On 8 GB Macs, keep the prompter on a cloud provider (Claude Code CLI). A local model running next to
 the speech engine during a live call made both slower in our tests. `prompterProvider` lets bigger Macs

@@ -204,7 +204,7 @@ public struct AnthropicProvider: AIProvider {
 // MARK: - Keychain
 
 public enum Keychain {
-    static let service = "id.roxst.hush"
+    static let service = "app.airo.hush"
 
     public static func set(_ account: String, _ value: String) {
         let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]

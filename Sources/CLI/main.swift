@@ -160,7 +160,7 @@ case "config":
 case "key":
     guard args.count >= 2, ["openai", "anthropic"].contains(args[0]) else { fail("usage: hush key <openai|anthropic> <value>") }
     Keychain.set(args[0], args[1])
-    print(args[1].isEmpty ? "deleted \(args[0]) key" : "stored \(args[0]) key in Keychain (service id.roxst.hush)")
+    print(args[1].isEmpty ? "deleted \(args[0]) key" : "stored \(args[0]) key in Keychain (service app.airo.hush)")
 
 case "setup":
     let exe = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()

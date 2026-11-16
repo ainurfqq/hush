@@ -4,7 +4,7 @@
 <dict>
 	<key>CFBundleName</key><string>Hush</string>
 	<key>CFBundleDisplayName</key><string>Hush</string>
-	<key>CFBundleIdentifier</key><string>id.roxst.hush</string>
+	<key>CFBundleIdentifier</key><string>app.airo.hush</string>
 	<key>CFBundleExecutable</key><string>Hush</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
 	<key>CFBundleShortVersionString</key><string>0.1.0</string>

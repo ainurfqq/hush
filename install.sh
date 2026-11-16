@@ -2,7 +2,6 @@
 # Hush installer: builds from source on your Mac and installs to ~/Applications. No Xcode, no Apple account.
 #
 #   curl -fsSL https://raw.githubusercontent.com/ainurfqq/hush-meetings/main/install.sh | bash
-#   (private repo:  gh api repos/ainurfqq/hush-meetings/contents/install.sh -H "Accept: application/vnd.github.raw" | bash)
 #   (from a clone:  bash install.sh)
 #
 # Options (environment): HUSH_REF=<branch|tag> (default main) · HUSH_SKIP_MODELS=1 · HUSH_SMALL_MODEL=1
@@ -70,7 +69,7 @@ step "Building (about 1-2 minutes)"
 bash "$SRC/scripts/build.sh"
 
 step "Installing to $APPS"
-osascript -e 'tell application id "id.roxst.hush" to quit' >/dev/null 2>&1 || true
+osascript -e 'tell application id "app.airo.hush" to quit' >/dev/null 2>&1 || true
 pkill -f "Hush.app/Contents/MacOS/Hush" >/dev/null 2>&1 || true
 mkdir -p "$APPS" "$BIN"
 rm -rf "$APPS/Hush.app"

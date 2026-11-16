@@ -27,7 +27,7 @@ final class SystemAudioTap {
         // Tap-only aggregate: no output sub-device. With voice processing on, the output device gains extra
         // input streams (echo reference); including it mixes those into the call audio (found in QA, run-1/QA-REPORT.md).
         let agg: [String: Any] = [
-            kAudioAggregateDeviceNameKey: "Hush Tap", kAudioAggregateDeviceUIDKey: "id.roxst.hush.tap.\(UUID().uuidString)",
+            kAudioAggregateDeviceNameKey: "Hush Tap", kAudioAggregateDeviceUIDKey: "app.airo.hush.tap.\(UUID().uuidString)",
             kAudioAggregateDeviceIsPrivateKey: true, kAudioAggregateDeviceIsStackedKey: false, kAudioAggregateDeviceTapAutoStartKey: true,
             kAudioAggregateDeviceTapListKey: [[kAudioSubTapDriftCompensationKey: true, kAudioSubTapUIDKey: desc.uuid.uuidString]],
         ]

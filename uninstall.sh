@@ -7,15 +7,15 @@ APPS="${HUSH_APPS_DIR:-$HOME/Applications}"
 BIN="${HUSH_BIN_DIR:-$HOME/.local/bin}"
 DATA="$HOME/Library/Application Support/Hush"
 
-osascript -e 'tell application id "id.roxst.hush" to quit' >/dev/null 2>&1 || true
+osascript -e 'tell application id "app.airo.hush" to quit' >/dev/null 2>&1 || true
 pkill -f "Hush.app/Contents/MacOS/Hush" >/dev/null 2>&1 || true
 [ -f "$DATA/whisper-server.pid" ] && kill "$(cat "$DATA/whisper-server.pid")" 2>/dev/null || true
 
 rm -rf "$APPS/Hush.app" && echo "removed $APPS/Hush.app"
 [ -L "$BIN/hush" ] && rm -f "$BIN/hush" && echo "removed $BIN/hush"
 if command -v claude >/dev/null 2>&1; then claude mcp remove --scope user hush >/dev/null 2>&1 && echo "removed Claude Code MCP entry 'hush'" || true; fi
-for a in openai anthropic; do security delete-generic-password -s id.roxst.hush -a "$a" >/dev/null 2>&1 && echo "removed Keychain key: $a" || true; done
-tccutil reset All id.roxst.hush >/dev/null 2>&1 || true
+for a in openai anthropic; do security delete-generic-password -s app.airo.hush -a "$a" >/dev/null 2>&1 && echo "removed Keychain key: $a" || true; done
+tccutil reset All app.airo.hush >/dev/null 2>&1 || true
 
 if [ "${1:-}" = "--purge" ]; then
   rm -rf "$DATA" && echo "deleted $DATA (meetings, models, source)"
