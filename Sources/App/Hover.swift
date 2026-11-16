@@ -46,14 +46,11 @@ private struct FilledBody: View {
         let hot = h.on && enabled
         c.label.font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
             .padding(.horizontal, 12).padding(.vertical, 6)
+            // Plain and flat: a little darker on hover, darker again while pressed. No glow, no lift.
             .background(
                 RoundedRectangle(cornerRadius: 10).fill(bg)
-                    .overlay(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(hot && !c.isPressed ? 0.10 : 0)))
-                    .overlay(RoundedRectangle(cornerRadius: 10).fill(Color.black.opacity(c.isPressed ? 0.12 : 0)))
-                    .shadow(color: bg.opacity(hot ? 0.32 : 0), radius: hot ? 8 : 0, y: hot ? 3 : 0)
+                    .overlay(RoundedRectangle(cornerRadius: 10).fill(Color.black.opacity(c.isPressed ? 0.18 : (hot ? 0.10 : 0))))
             )
-            .scaleEffect(c.isPressed && !reduceMotion ? 0.97 : 1)
-            .offset(y: hot && !c.isPressed && !reduceMotion ? -1 : 0)
             .opacity(enabled ? 1 : 0.5)
             .animation(.easeOut(duration: 0.09), value: c.isPressed)
             .tracksHover(h, cursor: enabled)
@@ -73,7 +70,6 @@ private struct OutlineBody: View {
             .padding(.horizontal, 12).padding(.vertical, 6)
             .background(RoundedRectangle(cornerRadius: 10).fill(c.isPressed ? Theme.chip : (h.on ? Theme.rgb(0xFAF7F1) : .white)))
             .overlay(RoundedRectangle(cornerRadius: 10).stroke(h.on ? Theme.ink3.opacity(0.55) : Theme.line))
-            .scaleEffect(c.isPressed && !reduceMotion ? 0.98 : 1)
             .opacity(enabled ? 1 : 0.5)
             .animation(.easeOut(duration: 0.09), value: c.isPressed)
             .tracksHover(h, cursor: enabled)
@@ -149,8 +145,7 @@ private struct ChipBody: View {
     @StateObject var h = HoverBox()
     var body: some View {
         c.label
-            .brightness(h.on ? (dark ? 0.12 : -0.04) : 0)
-            .scaleEffect(c.isPressed && !reduceMotion ? 0.96 : (h.on && !reduceMotion ? 1.03 : 1))
+            .brightness(c.isPressed ? (dark ? 0.18 : -0.08) : (h.on ? (dark ? 0.10 : -0.04) : 0))
             .animation(.easeOut(duration: 0.09), value: c.isPressed)
             .tracksHover(h)
     }
