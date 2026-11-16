@@ -46,6 +46,8 @@ public struct Config: Codable, Equatable {
     public var codexPath: String = ""
     /// whisper model file name inside `models/`.
     public var asrModel: String = "ggml-large-v3-turbo-q5_0.bin"
+    /// Faster model for live captions + prompter. The big model still makes the final transcript after the meeting.
+    public var liveAsrModel: String = "ggml-small-q5_1.bin"
     /// "auto", "id", "en", …
     public var language: String = "auto"
     public var storageDir: String? = nil
@@ -61,7 +63,7 @@ public struct Config: Codable, Equatable {
     public init() {}
 
     enum CodingKeys: String, CodingKey {
-        case provider, prompterProvider, model, prompterModel, openAIBaseURL, claudePath, codexPath, asrModel, language, storageDir,
+        case provider, prompterProvider, model, prompterModel, openAIBaseURL, claudePath, codexPath, asrModel, liveAsrModel, language, storageDir,
              prompterOpacity, prompterAutoAnswer, contextFile, userName, keepAudio, acknowledgedAINotice, acknowledgedConsent
     }
     /// Tolerant decoding: unknown or missing keys fall back to defaults, so old config files keep working.
@@ -76,6 +78,7 @@ public struct Config: Codable, Equatable {
         claudePath = (try? c.decode(String.self, forKey: .claudePath)) ?? d.claudePath
         codexPath = (try? c.decode(String.self, forKey: .codexPath)) ?? d.codexPath
         asrModel = (try? c.decode(String.self, forKey: .asrModel)) ?? d.asrModel
+        liveAsrModel = (try? c.decode(String.self, forKey: .liveAsrModel)) ?? d.liveAsrModel
         language = (try? c.decode(String.self, forKey: .language)) ?? d.language
         storageDir = try? c.decode(String.self, forKey: .storageDir)
         prompterOpacity = (try? c.decode(Double.self, forKey: .prompterOpacity)) ?? d.prompterOpacity

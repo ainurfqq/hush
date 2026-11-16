@@ -86,8 +86,12 @@ final class AppModel: ObservableObject {
         liveLines.append(line)
         if let s0 = simStart { print(String(format: "LINE_AT %.2f (audio clock) chunk@%.1f: %@", Date().timeIntervalSince(s0), line.t, line.text)); fflush(stdout) }
         if liveLines.count > 400 { liveLines.removeFirst(100) }
+        recorder?.liveLog("\(line.who == "me" ? "Me" : "Them"): \(line.text)")
         guard line.who != "me", config.prompterAutoAnswer, (config.prompterProvider ?? config.provider) != .none,
-              let q = QuestionDetector.question(in: line.text) else { return }
+              var q = QuestionDetector.question(in: line.text) else { return }
+        // A short or cut-off question gets the line before it as context ("…for the launch. What do you think?").
+        let others = liveLines.filter { $0.who != "me" }
+        if q.split(separator: " ").count < 7, others.count >= 2 { q = others[others.count - 2].text + " " + q }
         answer(q)
     }
 
@@ -100,6 +104,7 @@ final class AppModel: ObservableObject {
         guard !answering, Date().timeIntervalSince(lastQuestionAt) > 2 else { return }
         guard let provider = AI.provider(config, forPrompter: true) else { prompterStatus = "Set an AI provider in Settings"; return }
         answering = true; lastQuestionAt = Date()
+        recorder?.liveLog("QUESTION caught: \(question)")
         prompterQuestion = question; prompterAnswer = ""; prompterStatus = "Drafting answer…"
         if !prompterVisible { showPrompter() }
         let recent = liveLines.suffix(40).map { "\($0.who == "me" ? (config.userName.isEmpty ? "Me" : config.userName) : "Them"): \($0.text)" }.joined(separator: "\n")
@@ -117,12 +122,14 @@ final class AppModel: ObservableObject {
                     self.prompterAnswer = a
                     self.prompterStatus = String(format: "Answered in %.1f s · %@", dt, provider.name)
                     Log.write(String(format: "prompter answer %.2f s via %@", dt, provider.name))
+                    self.recorder?.liveLog(String(format: "ANSWER after %.1f s (%@): ", dt, provider.name) + a.replacingOccurrences(of: "\n", with: " / "))
                     NotificationCenter.default.post(name: .hushAnswerShown, object: dt)
                     if let s0 = self.simStart {
                         print(String(format: "ANSWER_SHOWN_AT %.2f (audio clock) | AI %.2f s | Q: %@", Date().timeIntervalSince(s0), dt, question)); fflush(stdout)
                     }
                 case .failure(let e):
                     self.prompterStatus = "AI error"; self.prompterAnswer = "\(e)"
+                    self.recorder?.liveLog("ANSWER failed: \(e)")
                 }
             }
         }
@@ -153,7 +160,7 @@ final class AppModel: ObservableObject {
     }
 
     func simulate(_ url: URL) {
-        _ = try? WhisperServer.shared.ensureRunning(config: config)   // a real recording warms it at start, too
+        _ = try? WhisperServer.shared.ensureRunning(config: config, live: true)   // a real recording warms it at start, too
         let f = FileFeeder()
         f.onLine = { [weak self] l in DispatchQueue.main.async { self?.addLive(l) } }
         feeder = f; isRecording = true; prompterStatus = "Simulating from \(url.lastPathComponent)"; simStart = Date()

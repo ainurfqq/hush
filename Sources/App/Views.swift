@@ -264,7 +264,11 @@ struct SettingsView: View {
             Section("Transcription (on this Mac)") {
                 Picker("Model", selection: $model.config.asrModel) {
                     Text("Large v3 turbo (best, 574 MB)").tag("ggml-large-v3-turbo-q5_0.bin")
-                    Text("Small (faster, 190 MB; run `hush setup` with HUSH_SMALL_MODEL=1)").tag("ggml-small-q5_1.bin")
+                    Text("Small (faster, 190 MB)").tag("ggml-small-q5_1.bin")
+                }
+                Picker("Live model (captions + prompter)", selection: $model.config.liveAsrModel) {
+                    Text("Small (fast, recommended on 8 GB Macs)").tag("ggml-small-q5_1.bin")
+                    Text("Same as final transcript (slower, more accurate)").tag("")
                 }
                 Picker("Language", selection: $model.config.language) {
                     Text("Auto (Indonesian + English mix)").tag("auto"); Text("Indonesian").tag("id"); Text("English").tag("en")

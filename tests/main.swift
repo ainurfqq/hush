@@ -128,6 +128,11 @@ test("Transcriber.cleanText strips silence tokens and whitespace") {
     expect(!Transcriber.isLikelyHallucination("Terima kasih telah menonton!", duration: 9), "long real speech kept")
 }
 
+test("Repetition filter catches whisper noise loops, keeps normal speech") {
+    expect(Transcriber.isRepetitive("I don't know what I'm talking about. I don't know what I'm talking about. I don't know what I'm talking about."), "loop")
+    expect(!Transcriber.isRepetitive("What is your timeline? We want to launch in January. Is that realistic?"), "normal speech")
+}
+
 test("MultipartForm is well formed") {
     var f = MultipartForm(); f.addField("language", "auto"); f.addFile("file", filename: "a.wav", mime: "audio/wav", data: Data([1, 2, 3]))
     let body = String(decoding: f.finalBody, as: UTF8.self)

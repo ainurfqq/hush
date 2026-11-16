@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Downloads Hush's local engines and models into ~/Library/Application Support/Hush and checks SHA-256.
-# Safe to re-run: files with the right hash are kept. Set HUSH_SMALL_MODEL=1 to also fetch the 190 MB model.
+# Safe to re-run: files with the right hash are kept.
 # Set HUSH_LOCAL_CACHE=<dir> to copy files from a local folder instead of downloading (used in development).
 set -euo pipefail
 BASE="${HUSH_HOME:-$HOME/Library/Application Support/Hush}"

@@ -23,7 +23,6 @@ final class Recorder {
     private let q = DispatchQueue(label: "hush.recorder")
     private let asrQ = DispatchQueue(label: "hush.live-asr")
     private(set) var started = Date()
-    private var pendingASR = 0
 
     var onLine: ((LiveLine) -> Void)?
     var onLevels: ((Float, Float) -> Void)?   // mic, system (RMS of last buffer)
@@ -50,7 +49,7 @@ final class Recorder {
             catch { mic.stop(); throw error }
         }
         started = Date()
-        DispatchQueue.global().async { _ = try? WhisperServer.shared.ensureRunning() }
+        DispatchQueue.global().async { _ = try? WhisperServer.shared.ensureRunning(live: true) }
     }
 
     private func ingest(_ s: [Float], system: Bool) {
@@ -68,21 +67,59 @@ final class Recorder {
         onLevels?(micLevel, sysLevel)
     }
 
+    // MARK: live ASR scheduling
+    // One ASR call at a time. Call audio ("them") goes first: that is where questions come from.
+    // When behind, waiting chunks of the same channel are joined into one call instead of dropped.
+    // Mic chunks are context only: kept to the newest 3 and skipped when quiet.
+    private var waiting: [(t: Double, who: String, samples: [Float])] = []
+    private var asrBusy = false
+
     private func transcribe(_ chunk: [Float], at t: Double, who: String) {
-        guard WAV.rms(chunk[...]) > 0.006 else { return }      // silence
-        if pendingASR > 4 { Log.write("live ASR behind, dropping a \(who) chunk"); return }  // never fall minutes behind
-        pendingASR += 1
+        let gate: Float = who == "me" ? 0.015 : 0.006       // the mic hears room noise; be stricter
+        guard WAV.rms(chunk[...]) > gate else { return }
+        waiting.append((t, who, chunk))
+        let mine = waiting.filter { $0.who == "me" }
+        if mine.count > 3, let oldest = waiting.firstIndex(where: { $0.who == "me" }) {
+            waiting.remove(at: oldest); Log.write("live ASR busy: skipped an old mic chunk")
+        }
+        pump()
+    }
+
+    /// Runs on `q`.
+    private func pump() {
+        guard !asrBusy, !waiting.isEmpty else { return }
+        let who = waiting.contains { $0.who == "them" } ? "them" : "me"
+        var t0 = -1.0, joined: [Float] = []
+        let gap = [Float](repeating: 0, count: 4800)       // 0.3 s between joined chunks
+        while let i = waiting.firstIndex(where: { $0.who == who }), Double(joined.count + waiting[i].samples.count) / 16000 <= 25 || joined.isEmpty {
+            let c = waiting.remove(at: i)
+            if t0 < 0 { t0 = c.t } else { joined += gap }
+            joined += c.samples
+        }
+        if joined.count > 9 * 16000 { Log.write(String(format: "live ASR caught up: joined %.1f s of %@ audio", Double(joined.count) / 16000, who)) }
+        asrBusy = true
+        let start = t0, audio = joined
         asrQ.async { [weak self] in
-            defer { self?.q.async { self?.pendingASR -= 1 } }
+            defer { self?.q.async { self?.asrBusy = false; self?.pump() } }
             let f = FileManager.default.temporaryDirectory.appendingPathComponent("hush-live-\(UUID().uuidString).wav")
             defer { try? FileManager.default.removeItem(at: f) }
             do {
-                try WAV.write(chunk[...], to: f)
-                let p = try Transcriber.transcribe(f)
-                guard !p.text.isEmpty, p.noSpeech < 0.8, !Transcriber.isLikelyHallucination(p.text, duration: Double(chunk.count) / 16000) else { return }
-                self?.onLine?(LiveLine(t: t, who: who, text: p.text))
+                try WAV.write(audio[...], to: f)
+                let p = try Transcriber.transcribe(f, live: true)
+                let dur = Double(audio.count) / 16000
+                guard !p.text.isEmpty, p.noSpeech < 0.8, !Transcriber.isLikelyHallucination(p.text, duration: dur),
+                      !Transcriber.isRepetitive(p.text) else { return }
+                self?.onLine?(LiveLine(t: start, who: who, text: p.text))
             } catch { Log.write("live ASR: \(error)") }
         }
+    }
+
+    /// Appends one line to the meeting's live log (live.md): what Hush heard and what the prompter did.
+    func liveLog(_ text: String) {
+        let url = Store.folder(meetingID).appendingPathComponent("live.md")
+        let line = "[\(formatTime(Date().timeIntervalSince(started)))] \(text)\n"
+        if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(Data(line.utf8)); try? h.close() }
+        else { try? Data(("# Live log\n\n" + line).utf8).write(to: url) }
     }
 
     /// Stops capture and returns the stored meeting (status .recorded).
@@ -116,7 +153,7 @@ final class FileFeeder {
                         do {
                             let f = FileManager.default.temporaryDirectory.appendingPathComponent("hush-sim-\(UUID().uuidString).wav")
                             try WAV.write(chunk[...], to: f); defer { try? FileManager.default.removeItem(at: f) }
-                            let p = try Transcriber.transcribe(f)
+                            let p = try Transcriber.transcribe(f, live: true)
                             if !p.text.isEmpty { onLine?(LiveLine(t: t, who: who, text: p.text)) }
                         } catch { Log.write("simulate: \(error)") }
                     }

@@ -6,7 +6,11 @@ public enum Engines {
     public static var sherpaDiarizer: URL { Paths.engines.appendingPathComponent("\(sherpaDirName)/bin/sherpa-onnx-offline-speaker-diarization") }
     public static var segmentationModel: URL { Paths.models.appendingPathComponent("sherpa-onnx-pyannote-segmentation-3-0/model.onnx") }
     public static var embeddingModel: URL { Paths.models.appendingPathComponent("3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx") }
-    public static func asrModel(_ c: Config = .load()) -> URL { Paths.models.appendingPathComponent(c.asrModel) }
+    public static func asrModel(_ c: Config = .load(), live: Bool = false) -> URL {
+        let liveURL = Paths.models.appendingPathComponent(c.liveAsrModel)
+        if live, !c.liveAsrModel.isEmpty, FileManager.default.fileExists(atPath: liveURL.path) { return liveURL }
+        return Paths.models.appendingPathComponent(c.asrModel)
+    }
     public static var whisperServer: String? { Shell.which("whisper-server") }
 
     /// Human-readable readiness report (used by `hush doctor` and the app's setup panel).
@@ -30,9 +34,9 @@ public final class WhisperServer {
     private let lock = NSLock()
     private var modelPath = ""
 
-    public func ensureRunning(config: Config = .load()) throws -> Int {
+    public func ensureRunning(config: Config = .load(), live: Bool = false) throws -> Int {
         lock.lock(); defer { lock.unlock() }
-        let model = Engines.asrModel(config).path
+        let model = Engines.asrModel(config, live: live).path
         if let p = process, p.isRunning, modelPath == model { return port }
         process?.terminate()
         guard let exe = Engines.whisperServer else { throw HushError.missing("whisper-server. Install with: brew install whisper-cpp") }
@@ -89,8 +93,8 @@ public struct TranscriptPiece { public var text: String; public var language: St
 
 public enum Transcriber {
     /// Transcribes one short WAV file (≤ ~30 s) with per-call language detection.
-    public static func transcribe(_ wav: URL, language: String = "auto", config: Config = .load()) throws -> TranscriptPiece {
-        let port = try WhisperServer.shared.ensureRunning(config: config)
+    public static func transcribe(_ wav: URL, language: String = "auto", config: Config = .load(), live: Bool = false) throws -> TranscriptPiece {
+        let port = try WhisperServer.shared.ensureRunning(config: config, live: live)
         var form = MultipartForm()
         form.addFile("file", filename: "a.wav", mime: "audio/wav", data: try Data(contentsOf: wav))
         form.addField("response_format", "verbose_json")
@@ -126,6 +130,15 @@ public enum Transcriber {
     static func langCode(_ s: String) -> String {
         let map = ["english": "en", "indonesian": "id", "malay": "ms", "javanese": "jw", "sundanese": "su"]
         return map[s.lowercased()] ?? s
+    }
+
+    /// Whisper on noise often loops one sentence ("I don't know what I'm talking about." ×10).
+    public static func isRepetitive(_ text: String) -> Bool {
+        let parts = text.lowercased().split(whereSeparator: { ".?!".contains($0) })
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        guard parts.count >= 3 else { return false }
+        let most = Dictionary(grouping: parts, by: { $0 }).values.map(\.count).max() ?? 0
+        return Double(most) / Double(parts.count) >= 0.6
     }
 
     /// Short silent-audio hallucinations whisper is known to emit.
