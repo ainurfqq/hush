@@ -14,19 +14,22 @@ Status: v0.1, Apple Silicon, macOS 14.4+. Tested on an M2 with 8 GB RAM, macOS 2
 
 ## Install
 
-One command (needs [Homebrew](https://brew.sh); Apple's free Command Line Tools are installed if missing; no Xcode, no Apple account):
+With [Homebrew](https://brew.sh) (Apple's free Command Line Tools are needed to build; no Xcode, no Apple account):
+
+```bash
+brew install ainurfqq/tap/hush
+hush open
+```
+
+Hush is built on your Mac from the tagged source (checksum-pinned), and `whisper.cpp` comes along as a
+dependency. The welcome guide downloads about 800 MB of speech models, each checked against a pinned SHA-256
+(`scripts/engines.lock`). Update with `brew upgrade hush`, remove with `brew uninstall hush`.
+
+Without Homebrew's tap, the one-line installer does the same into `~/Applications`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ainurfqq/hush-meetings/main/install.sh | bash
 ```
-
-The installer builds Hush from source, installs `~/Applications/Hush.app`, links the `hush` command
-into `~/.local/bin`, installs `whisper.cpp` with Homebrew and downloads about 800 MB of models
-(each checked against a pinned SHA-256 in `scripts/engines.lock`).
-
-Then run `open ~/Applications/Hush.app`. A waveform icon appears in the menu bar.
-
-Uninstall: `bash ~/Library/Application\ Support/Hush/src/uninstall.sh` (add `--purge` to also delete meetings and models).
 
 ## Use
 
