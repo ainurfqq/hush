@@ -655,6 +655,7 @@ struct SetupView: View {
                     if let d = model.aiDetect { Text(d).font(.system(size: 12)).foregroundStyle(Theme.ink3) }
                     Picker("Use", selection: $model.config.provider) { ForEach(ProviderKind.allCases, id: \.self) { Text($0.label).tag($0) } }
                         .labelsHidden().onChange(of: model.config.provider) { _ in model.saveConfig() }
+                    Button("Set up free AI on this Mac (Ollama)…") { model.openWindowAction?("ollama") }.buttonStyle(LinkStyle()).font(.system(size: 12))
                     if model.config.provider == .none {
                         Text("Without AI, Hush still records, transcribes, labels speakers, finds tasks and searches. The prompter shows matching points from your notes file. For written summaries and answers, install Claude Code or the free Ollama (best on 16 GB Macs).")
                             .font(.system(size: 12)).foregroundStyle(Theme.ink2).fixedSize(horizontal: false, vertical: true)
@@ -743,6 +744,7 @@ struct SettingsView: View {
                     SecureField("API key", text: $model.settingsKey, prompt: Text("stored in the macOS Keychain"))
                     Button("Save key") { Keychain.set(model.config.provider == .anthropic ? "anthropic" : "openai", apiKey); model.settingsKey = ""; model.settingsTest = "Key saved to Keychain." }
                 }
+                Button("Set up free AI on this Mac (Ollama)…") { model.openWindowAction?("ollama") }.buttonStyle(LinkStyle())
                 HStack {
                     Button("Test") { test() }.buttonStyle(OutlineButton())
                     Text(model.settingsTest).font(.caption).foregroundStyle(.secondary).lineLimit(2)

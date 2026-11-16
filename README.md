@@ -85,6 +85,38 @@ On 8 GB Macs, keep the prompter on a cloud provider (Claude Code CLI). A local m
 the speech engine during a live call made both slower in our tests. `prompterProvider` lets bigger Macs
 use a local model for the prompter only.
 
+## Free AI on this Mac (Ollama)
+
+No AI subscription? Hush works without AI (recording, transcript, speakers, tasks, search; the prompter shows
+matching points from your notes file). For written summaries, use the free [Ollama](https://ollama.com):
+
+1. Hush → Settings → **Set up free AI on this Mac (Ollama)…** (or the link in first-run setup).
+2. **Install Ollama** (download from ollama.com, or `brew install ollama`), then **Start Ollama**.
+3. **Download a model.** Hush picks one for your Mac's memory:
+
+   | Mac memory | Model | Download | Licence |
+   |---|---|---|---|
+   | 8 GB | `qwen2.5:3b` | 1.9 GB | Qwen license |
+   | 16 GB or more | `qwen2.5:7b` | 4.7 GB | Apache 2.0 |
+
+   (sizes from ollama.com/library/qwen2.5)
+4. **Use Ollama.** Hush switches its AI to `http://127.0.0.1:11434/v1` and runs a test.
+
+On 8 GB Macs, Hush keeps live prompter answers on your notes file: a local model running next to live
+speech-to-text made both slow in our tests (answers took 9–11 s instead of ~2 s alone). Summaries after the
+meeting use Ollama. Small local models are less accurate than Claude (in our test a 3B model once gave a
+task to the wrong person), so check owners in the Tasks tab.
+
+From the terminal:
+
+```bash
+brew install ollama && ollama serve &      # or open the Ollama app
+ollama pull qwen2.5:3b                     # qwen2.5:7b on 16 GB+
+hush config set provider openai-compatible
+hush config set openAIBaseURL http://127.0.0.1:11434/v1
+hush config set model qwen2.5:3b
+```
+
 ## Claude Code / MCP
 
 ```bash

@@ -19,6 +19,8 @@ struct HushApp: App {
             .defaultSize(width: 640, height: 780)
         Window("Set up Hush", id: "setup") { SetupView().environmentObject(AppDelegate.model) }
             .windowResizability(.contentSize)
+        Window("Free AI on this Mac", id: "ollama") { OllamaGuideView().environmentObject(AppDelegate.model) }
+            .windowResizability(.contentSize)
         Window("Hush Settings", id: "settings") { SettingsView().environmentObject(AppDelegate.model) }
             .windowResizability(.contentSize)
         // QA only (opened with --open menupreview): the menu-bar popover in a normal window for screenshots.
