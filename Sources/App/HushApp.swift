@@ -55,6 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Hotkeys.shared.register(keyCode: kVK_ANSI_A, modifiers: mods) { m.answerLastQuestion() }
         Hotkeys.shared.register(keyCode: kVK_ANSI_R, modifiers: mods) { m.toggleRecording() }
         recoverInterrupted()
+        if !Self.model.config.setupDone && !CommandLine.arguments.contains(where: { $0.hasPrefix("--") }) { Self.model.detectAI() }
         TestHooks.run(Self.model, CommandLine.arguments)
     }
 

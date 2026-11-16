@@ -651,9 +651,14 @@ struct SetupView: View {
                 step(st.mic, "Microphone", "For your side of the call, or the whole room", action: st.mic ? nil : ("Allow", { MicCapture.requestAccess { _ in st.refresh() } }))
                 step(st.callAudioTried, "Call audio", "macOS asks the first time you record a call. Click Allow then.", action: nil, optional: true)
                 VStack(alignment: .leading, spacing: 6) {
-                    HStack { icon(model.config.provider != .none); Text("AI for notes and answers").font(.system(size: 14, weight: .semibold)); Spacer() }
+                    HStack { icon(model.config.provider != .none); Text("AI for summaries and answers (optional)").font(.system(size: 14, weight: .semibold)); Spacer() }
+                    if let d = model.aiDetect { Text(d).font(.system(size: 12)).foregroundStyle(Theme.ink3) }
                     Picker("Use", selection: $model.config.provider) { ForEach(ProviderKind.allCases, id: \.self) { Text($0.label).tag($0) } }
                         .labelsHidden().onChange(of: model.config.provider) { _ in model.saveConfig() }
+                    if model.config.provider == .none {
+                        Text("Without AI, Hush still records, transcribes, labels speakers, finds tasks and searches. The prompter shows matching points from your notes file. For written summaries and answers, install Claude Code or the free Ollama (best on 16 GB Macs).")
+                            .font(.system(size: 12)).foregroundStyle(Theme.ink2).fixedSize(horizontal: false, vertical: true)
+                    }
                 }.padding(14).background(Color.white, in: RoundedRectangle(cornerRadius: 12)).overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
                 step(model.config.lastHiddenCheck.hasPrefix("hidden"), "Prompter hidden from screen share",
                      model.hiddenCheck ?? "One-click test on your Mac, about 3 seconds",
@@ -742,6 +747,7 @@ struct SettingsView: View {
                     Button("Test") { test() }.buttonStyle(OutlineButton())
                     Text(model.settingsTest).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
+                Toggle("Hide passwords, keys and card/ID numbers before sending", isOn: $model.config.maskSecrets)
                 Text("Only transcript text you summarize or ask about is sent to this provider. Audio never leaves your Mac.")
                     .font(.caption).foregroundStyle(.secondary)
             }

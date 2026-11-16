@@ -136,6 +136,32 @@ test("Pipeline.split gives each turn its words by time") {
     expect(Pipeline.split(p, offsets: [0], total: 7) == ["Halo semua. Apa kabar?"], "single turn keeps whole text")
 }
 
+test("Notes mode finds the right prepared answer (EN question, ID notes) without AI") {
+    let notes = """
+    # Timeline
+    Kampanye pertama launch 5 Januari. Strategi final minggu depan.
+
+    # Anggaran
+    Budget 45 juta per bulan, 60% untuk iklan.
+
+    Q: Kenapa pilih agensi kami?
+    Kami respon dalam 24 jam lewat grup WhatsApp.
+    """
+    let a = Retrieval.notesAnswer(question: "What is the budget per month?", notes: notes) ?? ""
+    expect(a.contains("45 juta"), a)
+    let b = Retrieval.notesAnswer(question: "What is your timeline?", notes: notes) ?? ""
+    expect(b.hasPrefix("• # Timeline") || b.contains("5 Januari"), b)
+    expect(Retrieval.notesAnswer(question: "Do you like football?", notes: notes) == nil, "no match → nil")
+    let c = Retrieval.catchUp([("Them", "Nice weather."), ("Them", "Budget kita 45 juta."), ("You", "Saya akan kirim proposal.")])
+    expect(c.count == 2, "\(c)")
+}
+
+test("Redact hides secrets but keeps names and ordinary numbers") {
+    let s = Redact.mask("Rina: password nya Hush2026! dan kartu 4111 1111 1111 1111, NIK 3471012345678901, key sk-ant-abcdefghijklmnopqrstu. Budget 45 juta.")
+    expect(!s.contains("Hush2026") && !s.contains("4111 1111") && !s.contains("3471012345678901") && !s.contains("sk-ant-abc"), s)
+    expect(s.contains("Rina") && s.contains("45 juta"), s)
+}
+
 test("Transcriber.cleanText strips silence tokens and whitespace") {
     expect(Transcriber.cleanText("  Halo\n dunia [BLANK_AUDIO] ") == "Halo dunia", Transcriber.cleanText("  Halo\n dunia [BLANK_AUDIO] "))
     expect(Transcriber.isLikelyHallucination("Terima kasih telah menonton!", duration: 2), "known outro")

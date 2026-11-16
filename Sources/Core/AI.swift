@@ -10,6 +10,11 @@ public protocol AIProvider {
 public enum AI {
     /// Builds the provider the user picked. Returns nil for `.none`.
     public static func provider(_ c: Config = .load(), forPrompter: Bool = false) -> AIProvider? {
+        guard let p = baseProvider(c, forPrompter: forPrompter) else { return nil }
+        return c.maskSecrets ? RedactingProvider(inner: p) : p
+    }
+
+    static func baseProvider(_ c: Config, forPrompter: Bool) -> AIProvider? {
         let kind = forPrompter ? (c.prompterProvider ?? c.provider) : c.provider
         // When the prompter uses its own provider, `prompterModel` is that provider's model.
         let split = forPrompter && c.prompterProvider != nil && c.prompterProvider != c.provider

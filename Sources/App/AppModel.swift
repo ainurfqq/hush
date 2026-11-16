@@ -109,7 +109,8 @@ final class AppModel: ObservableObject {
         if let s0 = simStart { print(String(format: "LINE_AT %.2f (audio clock) chunk@%.1f: %@", Date().timeIntervalSince(s0), line.t, line.text)); fflush(stdout) }
         if liveLines.count > 400 { liveLines.removeFirst(100) }
         recorder?.liveLog("\(line.who == "me" ? "Me" : "Them"): \(line.text)")
-        guard line.who != "me", config.prompterAutoAnswer, (config.prompterProvider ?? config.provider) != .none,
+        guard line.who != "me", config.prompterAutoAnswer,
+              (config.prompterProvider ?? config.provider) != .none || !notesText.isEmpty,
               var q = line.question else { return }
         // A short or cut-off question gets the line before it as context ("…for the launch. What do you think?").
         let others = liveLines.filter { $0.who != "me" }
@@ -131,7 +132,7 @@ final class AppModel: ObservableObject {
 
     func answer(_ question: String) {
         guard !answering, Date().timeIntervalSince(lastQuestionAt) > 2 else { return }
-        guard let provider = AI.provider(config, forPrompter: true) else { prompterStatus = "Set an AI provider in Settings"; return }
+        guard let provider = AI.provider(config, forPrompter: true) else { answerFromNotes(question, reason: nil); return }
         answering = true; lastQuestionAt = Date(); prompterAskedAt = liveLines.last(where: { $0.question != nil })?.heardAt ?? Date()
         recorder?.liveLog("QUESTION caught: \(question)")
         prompterQuestion = question; prompterAnswer = ""; prompterStatus = "Drafting answer…"
@@ -157,11 +158,36 @@ final class AppModel: ObservableObject {
                         print(String(format: "ANSWER_SHOWN_AT %.2f (audio clock) | AI %.2f s | Q: %@", Date().timeIntervalSince(s0), dt, question)); fflush(stdout)
                     }
                 case .failure(let e):
-                    self.prompterStatus = "AI error"; self.prompterAnswer = "\(e)"
                     self.recorder?.liveLog("ANSWER failed: \(e)")
+                    self.answerFromNotes(question, reason: "AI failed (\(String(describing: e).prefix(60))…)")
                 }
             }
         }
+    }
+
+    /// The user's notes file (CV, prepared answers, product facts), read fresh each time.
+    var notesText: String {
+        guard !config.contextFile.isEmpty else { return "" }
+        return (try? String(contentsOfFile: (config.contextFile as NSString).expandingTildeInPath, encoding: .utf8)) ?? ""
+    }
+
+    /// Notes mode: no AI needed. Shows the best matching pieces of the user's notes file.
+    func answerFromNotes(_ question: String, reason: String?) {
+        prompterQuestion = question; prompterAskedAt = Date()
+        if !prompterVisible { showPrompter() }
+        let notes = notesText
+        if notes.isEmpty {
+            prompterAnswer = "No AI is set up, so Hush cannot write an answer. Add a notes file with prepared answers (Settings → Prompter → Context notes file) and Hush will show the matching points here."
+            prompterStatus = reason ?? "No AI · notes mode"
+        } else if let a = Retrieval.notesAnswer(question: question, notes: notes) {
+            prompterAnswer = a
+            prompterStatus = (reason.map { $0 + " · " } ?? "") + "From your notes · no AI"
+        } else {
+            prompterAnswer = "Nothing in your notes matches this question."
+            prompterStatus = (reason.map { $0 + " · " } ?? "") + "Notes mode"
+        }
+        recorder?.liveLog("NOTES ANSWER: " + prompterAnswer.replacingOccurrences(of: "\n", with: " / "))
+        if let s0 = simStart { print(String(format: "NOTES_ANSWER_AT %.2f | Q: %@ | A: %@", Date().timeIntervalSince(s0), question, prompterAnswer.replacingOccurrences(of: "\n", with: " / "))); fflush(stdout) }
     }
 
     private func liveTranscript(since: Date? = nil) -> String {
@@ -173,7 +199,13 @@ final class AppModel: ObservableObject {
     /// "What did I miss?": bullets for the last 5 minutes.
     func whatDidIMiss() {
         guard !catchUpBusy else { return }
-        guard let p = AI.provider(config, forPrompter: true) else { catchUp = ["Set an AI provider in Settings first."]; return }
+        guard let p = AI.provider(config, forPrompter: true) else {
+            let cutoff = Date().addingTimeInterval(-300)
+            let lines = liveLines.filter { $0.heardAt >= cutoff }.map { (who: $0.who == "me" ? "You" : "Them", text: $0.text) }
+            let picked = Retrieval.catchUp(lines)
+            catchUp = picked.isEmpty ? ["Nothing important was said in the last 5 minutes."] : picked + ["(Key lines, no AI. Set up an AI for a real summary.)"]
+            return
+        }
         let recent = liveTranscript(since: Date().addingTimeInterval(-300))
         guard !recent.isEmpty else { catchUp = ["Nothing was said in the last 5 minutes."]; return }
         catchUpBusy = true
@@ -195,7 +227,12 @@ final class AppModel: ObservableObject {
     func askLive() {
         let q = askText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty, !askBusy else { return }
-        guard let p = AI.provider(config, forPrompter: true) else { askAnswer = "Set an AI provider in Settings first."; return }
+        guard let p = AI.provider(config, forPrompter: true) else {
+            let hits = Retrieval.best(q, in: liveLines.map { ($0.who == "me" ? "You: " : "Them: ") + $0.text }, k: 3)
+            askAnswer = hits.isEmpty ? "No line in this meeting matches that. (No AI: Hush searches the transcript by words.)"
+                                     : hits.joined(separator: "\n") + "\n(Matching lines, no AI.)"
+            return
+        }
         askBusy = true; askAnswer = nil
         let t = liveTranscript()
         DispatchQueue.global().async {
@@ -218,6 +255,21 @@ final class AppModel: ObservableObject {
 
     @Published var hiddenCheck: String?
     @Published var needsScreenPermission = false
+    @Published var aiDetect: String?
+
+    /// First run: pick the AI that is actually on this Mac (Claude Code, Codex, Ollama) or none.
+    func detectAI() {
+        DispatchQueue.global().async {
+            let f = AIDetect.run()
+            DispatchQueue.main.async {
+                self.config.provider = f.kind
+                if f.kind == .openAICompatible { self.config.model = f.model; self.config.openAIBaseURL = "http://127.0.0.1:11434/v1" }
+                self.aiDetect = f.detail
+                self.saveConfig()
+                Log.write("AI detect: \(f.detail)")
+            }
+        }
+    }
     func openScreenRecordingSettings() {
         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
     }

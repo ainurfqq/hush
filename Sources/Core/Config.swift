@@ -62,13 +62,15 @@ public struct Config: Codable, Equatable {
     public var acknowledgedAINotice: Bool = false
     public var acknowledgedConsent: Bool = false
     public var setupDone: Bool = false
+    /// Mask passwords, keys, card/ID numbers before text goes to an AI provider.
+    public var maskSecrets: Bool = true
     public var lastHiddenCheck: String = ""
 
     public init() {}
 
     enum CodingKeys: String, CodingKey {
         case provider, prompterProvider, model, prompterModel, openAIBaseURL, claudePath, codexPath, claudeConfigDir, asrModel, liveAsrModel, language, storageDir,
-             prompterOpacity, prompterAutoAnswer, contextFile, userName, keepAudio, acknowledgedAINotice, acknowledgedConsent, setupDone, lastHiddenCheck
+             prompterOpacity, prompterAutoAnswer, contextFile, userName, keepAudio, acknowledgedAINotice, acknowledgedConsent, setupDone, maskSecrets, lastHiddenCheck
     }
     /// Tolerant decoding: unknown or missing keys fall back to defaults, so old config files keep working.
     public init(from decoder: Decoder) throws {
@@ -94,6 +96,7 @@ public struct Config: Codable, Equatable {
         acknowledgedAINotice = (try? c.decode(Bool.self, forKey: .acknowledgedAINotice)) ?? d.acknowledgedAINotice
         acknowledgedConsent = (try? c.decode(Bool.self, forKey: .acknowledgedConsent)) ?? d.acknowledgedConsent
         setupDone = (try? c.decode(Bool.self, forKey: .setupDone)) ?? d.setupDone
+        maskSecrets = (try? c.decode(Bool.self, forKey: .maskSecrets)) ?? d.maskSecrets
         lastHiddenCheck = (try? c.decode(String.self, forKey: .lastHiddenCheck)) ?? d.lastHiddenCheck
     }
 
