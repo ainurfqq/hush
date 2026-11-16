@@ -32,6 +32,8 @@ struct MenuContent: View {
             }
             Divider()
             Button(model.prompterVisible ? "Hide prompter  ⌃⌥H" : "Show prompter  ⌃⌥H") { model.togglePrompter() }
+            Button("Check prompter is hidden from screen capture") { model.checkPrompterHidden() }
+            if let h = model.hiddenCheck { Text(h).font(.caption).foregroundStyle(h.hasPrefix("Hidden") ? .green : .orange).lineLimit(4) }
             Button("Copy consent message") { model.copyConsent() }
             Button("Open Hush") { openWindow(id: "library"); NSApp.activate(ignoringOtherApps: true) }
             Button("Settings…") { openWindow(id: "settings"); NSApp.activate(ignoringOtherApps: true) }

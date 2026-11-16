@@ -37,7 +37,8 @@ public struct ClaudeCLIProvider: AIProvider {
 
     /// Arguments for a one-shot, tool-less, non-persistent call. Prompt goes on stdin.
     public func arguments(system: String, fast: Bool) -> [String] {
-        var a = ["-p", "--output-format", "text", "--no-session-persistence", "--tools", "", "--system-prompt", system]
+        // Meeting text is untrusted (anyone in the call can say anything): no tools, no MCP servers, no session.
+        var a = ["-p", "--output-format", "text", "--no-session-persistence", "--tools", "", "--strict-mcp-config", "--system-prompt", system]
         let m = fast && !fastModel.isEmpty ? fastModel : (fast && model.isEmpty ? "haiku" : model)
         if !m.isEmpty { a += ["--model", m] }
         return a

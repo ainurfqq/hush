@@ -19,7 +19,7 @@ swiftc "${FLAGS[@]}" -module-name HushCLI Sources/Core/*.swift Sources/CLI/main.
 
 echo "==> Hush (app)"
 swiftc "${FLAGS[@]}" -parse-as-library -module-name Hush Sources/Core/*.swift Sources/App/*.swift \
-  -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreAudio -framework Carbon \
+  -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreAudio -framework Carbon -framework ScreenCaptureKit \
   -o "$APP/Contents/MacOS/Hush"
 
 cp Resources/Info.plist "$APP/Contents/Info.plist"

@@ -2,7 +2,21 @@ import Foundation
 
 /// Meetings on disk: one folder per meeting with meeting.json + transcript.md + summary.md + audio.
 public enum Store {
-    public static func folder(_ id: String) -> URL { Paths.meetings.appendingPathComponent(id) }
+    /// Meeting ids come from MCP clients and the CLI, so only plain folder names are accepted (no "/", no "..").
+    public static func isValidID(_ id: String) -> Bool {
+        !id.isEmpty && id.count <= 120 && !id.hasPrefix(".") && id.allSatisfy { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
+    }
+
+    public static func folder(_ id: String) -> URL {
+        Paths.meetings.appendingPathComponent(isValidID(id) ? id : "invalid-meeting-id")
+    }
+
+    /// Meeting folders are private to the user (0700), also when storage is moved outside ~/Library.
+    static func makePrivateDir(_ url: URL) throws {
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: Paths.meetings.path)
+    }
 
     public static func newID(title: String, date: Date = Date()) -> String {
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd-HHmmss"; f.locale = Locale(identifier: "en_US_POSIX")
@@ -14,14 +28,15 @@ public enum Store {
 
     public static func create(_ m: Meeting) throws -> URL {
         let dir = folder(m.id)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try makePrivateDir(dir)
         try save(m)
         return dir
     }
 
     public static func save(_ m: Meeting) throws {
+        guard isValidID(m.id) else { throw HushError.missing("valid meeting id") }
         let dir = folder(m.id)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try makePrivateDir(dir)
         let enc = JSONEncoder(); enc.outputFormatting = [.prettyPrinted, .sortedKeys]; enc.dateEncodingStrategy = .iso8601
         try enc.encode(m).write(to: dir.appendingPathComponent("meeting.json"), options: .atomic)
         if !m.segments.isEmpty {
@@ -33,6 +48,7 @@ public enum Store {
     }
 
     public static func load(_ id: String) throws -> Meeting {
+        guard isValidID(id) else { throw HushError.missing("meeting \(id)") }
         let dec = JSONDecoder(); dec.dateDecodingStrategy = .iso8601
         return try dec.decode(Meeting.self, from: Data(contentsOf: folder(id).appendingPathComponent("meeting.json")))
     }
@@ -43,7 +59,10 @@ public enum Store {
         return ids.compactMap { try? load($0) }.sorted { $0.createdAt > $1.createdAt }
     }
 
-    public static func delete(_ id: String) throws { try FileManager.default.removeItem(at: folder(id)) }
+    public static func delete(_ id: String) throws {
+        guard isValidID(id) else { throw HushError.missing("meeting \(id)") }
+        try FileManager.default.removeItem(at: folder(id))
+    }
 
     /// Case- and accent-insensitive search over titles, transcript text, summary and action items.
     public static func search(_ query: String, in meetings: [Meeting]? = nil) -> [(meeting: Meeting, hits: [String])] {

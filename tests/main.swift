@@ -181,6 +181,9 @@ test("Store saves, loads, searches and writes Markdown") {
     expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("summary.md").path), "summary.md")
     expect(Store.search("PROPOSAL").first?.hits.isEmpty == false, "case-insensitive search")
     expect(Store.search("zzz-nothing").isEmpty, "no false hits")
+    expect((try? Store.load("../../etc")) == nil && !Store.isValidID("a/b") && !Store.isValidID("..") && Store.isValidID(m.id), "ids cannot escape the store")
+    let perms = (try FileManager.default.attributesOfItem(atPath: dir.path)[.posixPermissions] as? Int) ?? 0
+    expect(perms == 0o700, "meeting folder is private, got \(String(perms, radix: 8))")
     expect(Store.newID(title: "Rapat Tim / Q4!", date: Date(timeIntervalSince1970: 0)).hasSuffix("-rapat-tim-q4"), Store.newID(title: "Rapat Tim / Q4!"))
 }
 
@@ -195,7 +198,7 @@ test("Config decodes old/partial files with defaults") {
 
 test("Claude CLI arguments: print mode, no tools, no session, fast → haiku") {
     let a = ClaudeCLIProvider().arguments(system: "SYS", fast: true)
-    expect(a.starts(with: ["-p", "--output-format", "text", "--no-session-persistence", "--tools", ""]), "\(a)")
+    expect(a.starts(with: ["-p", "--output-format", "text", "--no-session-persistence", "--tools", "", "--strict-mcp-config"]), "\(a)")
     expect(a.contains("--system-prompt") && a.contains("SYS") && a.suffix(2) == ["--model", "haiku"], "\(a)")
     expect(!ClaudeCLIProvider(model: "opus").arguments(system: "S", fast: false).contains("haiku"), "explicit model kept")
 }
@@ -308,6 +311,8 @@ test("MCP server: initialize, tools/list, tools/call, errors, notifications") {
     expect(text(call(#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"get_transcript","arguments":{"meeting_id":"latest"}}}"#)).contains("What is your timeline"), "transcript")
     expect(text(call(#"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"search","arguments":{"query":"brand guidelines"}}}"#)).contains("Daniel"), "search")
     expect(text(call(#"{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"get_action_items","arguments":{}}}"#)).contains("Sari"), "action items")
+    let trav = call(#"{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"get_transcript","arguments":{"meeting_id":"../../../../etc"}}}"#)
+    expect((trav?["result"] as? [String: Any])?["isError"] as? Bool == true, "path traversal id rejected")
     let missing = call(#"{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"get_summary","arguments":{"meeting_id":"nope"}}}"#)
     expect((missing?["result"] as? [String: Any])?["isError"] as? Bool == true, "missing meeting → isError")
     expect(((call(#"{"jsonrpc":"2.0","id":8,"method":"bogus"}"#)?["error"] as? [String: Any])?["code"] as? Int) == -32601, "unknown method")

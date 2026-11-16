@@ -62,6 +62,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 ///   --show-prompter <seconds> "<text>"      show the prompter with text, then quit
 ///   --record <seconds> [call|room] [title]  record headlessly, process, quit
 ///   --simulate <wav> [seconds]              feed a WAV through the live path → prompter; logs answer latency
+///   --verify-hidden                         run the prompter screen-capture self-test, exit 0 if hidden
 enum TestHooks {
     static func run(_ m: AppModel, _ argv: [String]) {
         Log.echo = argv.contains("--verbose")
@@ -70,6 +71,13 @@ enum TestHooks {
             m.showPrompter()
             if let n = m.prompterWindowNumber { print("PROMPTER_WINDOW \(n)"); fflush(stdout) }
             quit(after: Double(argv[i + 1]) ?? 10)
+        }
+        if argv.contains("--verify-hidden") {
+            m.prompterQuestion = "Self-test"; m.prompterAnswer = "Hush prompter self-test: this text must not appear in screen captures."
+            m.checkPrompterHidden { r in
+                print("VERIFY_HIDDEN \(m.hiddenCheck ?? "no result")")
+                fflush(stdout); exit(r?.hidden == true && r?.valid == true ? 0 : 1)
+            }
         }
         if let i = argv.firstIndex(of: "--record"), i + 1 < argv.count {
             let secs = Double(argv[i + 1]) ?? 20

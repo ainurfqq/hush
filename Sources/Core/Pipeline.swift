@@ -177,7 +177,7 @@ public enum Pipeline {
         let t = title ?? src.deletingPathExtension().lastPathComponent
         let id = Store.newID(title: t)
         let dir = Store.folder(id)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try Store.makePrivateDir(dir)
         let dst = dir.appendingPathComponent("audio.wav")
         try WAV.convert(src, to: dst)
         let m = Meeting(id: id, title: t, duration: WAV.duration(dst), source: "import", audioFiles: ["audio.wav"])

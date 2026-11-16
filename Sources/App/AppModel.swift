@@ -137,6 +137,21 @@ final class AppModel: ObservableObject {
     func setOpacity(_ v: Double) { config.prompterOpacity = v; panel?.alphaValue = CGFloat(v); try? config.save() }
     var prompterWindowNumber: Int? { panel?.windowNumber }
 
+    @Published var hiddenCheck: String?
+    /// Runs the self-test that proves (or disproves) the prompter is hidden from ScreenCaptureKit on this Mac.
+    func checkPrompterHidden(_ done: ((PrompterCheck.Result?) -> Void)? = nil) {
+        showPrompter()
+        guard let p = panel else { return }
+        hiddenCheck = "Checking… (the prompter blinks twice)"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            PrompterCheck.run(panel: p) { r, err in
+                self.hiddenCheck = r?.summary ?? err
+                Log.write("prompter hidden check: \(self.hiddenCheck ?? "")")
+                done?(r)
+            }
+        }
+    }
+
     func simulate(_ url: URL) {
         _ = try? WhisperServer.shared.ensureRunning(config: config)   // a real recording warms it at start, too
         let f = FileFeeder()
