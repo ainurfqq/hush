@@ -29,7 +29,8 @@ mkdir -p "$APP/Contents/Resources/Fonts" && cp Resources/Fonts/* "$APP/Contents/
 
 # Signing: the local "Hush Local Signing" certificate when present (scripts/make-signing-cert.sh), so macOS keeps
 # Microphone / Screen Recording permissions across updates; otherwise ad-hoc. Neither is an Apple Developer ID.
-SIGN_ID="$(security find-certificate -c "Hush Local Signing" -Z "$HOME/Library/Keychains/login.keychain-db" 2>/dev/null | awk '/SHA-1 hash:/ {print $3; exit}')"
+# (No keychain, e.g. Homebrew's temporary HOME, must not stop the build: fall back to ad-hoc.)
+SIGN_ID="$( { security find-certificate -c "Hush Local Signing" -Z "$HOME/Library/Keychains/login.keychain-db" 2>/dev/null || true; } | awk '/SHA-1 hash:/ {print $3; exit}')"
 if [ -n "$SIGN_ID" ] && codesign --force --deep --sign "$SIGN_ID" --identifier app.airo.hush "$APP" >/dev/null 2>&1; then
   echo "==> signed with Hush Local Signing"
 else
