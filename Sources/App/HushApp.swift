@@ -89,6 +89,11 @@ enum TestHooks {
             quit(after: Double(argv[i + 1]) ?? 10)
         }
         if argv.contains("--demo") { demo(m); if argv.contains("--prompter") { m.showPrompter() } }
+        if let i = argv.firstIndex(of: "--notch"), i + 1 < argv.count {     // QA: --notch collapsed|hover|question
+            demo(m); m.isRecording = true; m.elapsed = 768; m.sysLevel = 0.06
+            m.notch.show()
+            switch argv[i + 1] { case "hover": m.notch.state.mode = .hover; case "question": m.notch.showQuestion(); m.notch.state.pinned = true; default: break }
+        }
         if let i = argv.firstIndex(of: "--open"), i + 1 < argv.count {
             let id = argv[i + 1]
             if let j = argv.firstIndex(of: "--select"), j + 1 < argv.count { m.libSelection = argv[j + 1] }

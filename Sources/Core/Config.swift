@@ -55,6 +55,8 @@ public struct Config: Codable, Equatable {
     public var storageDir: String? = nil
     public var prompterOpacity: Double = 0.85
     public var prompterAutoAnswer: Bool = true
+    /// "notch" = the notch bar while recording; "panel" = the floating prompter window.
+    public var prompterStyle: String = "notch"
     /// Plain-text file with the user's background (CV, product notes) for the prompter.
     public var contextFile: String = ""
     public var userName: String = ""
@@ -70,7 +72,7 @@ public struct Config: Codable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case provider, prompterProvider, model, prompterModel, openAIBaseURL, claudePath, codexPath, claudeConfigDir, asrModel, liveAsrModel, language, storageDir,
-             prompterOpacity, prompterAutoAnswer, contextFile, userName, keepAudio, acknowledgedAINotice, acknowledgedConsent, setupDone, maskSecrets, lastHiddenCheck
+             prompterOpacity, prompterAutoAnswer, prompterStyle, contextFile, userName, keepAudio, acknowledgedAINotice, acknowledgedConsent, setupDone, maskSecrets, lastHiddenCheck
     }
     /// Tolerant decoding: unknown or missing keys fall back to defaults, so old config files keep working.
     public init(from decoder: Decoder) throws {
@@ -90,6 +92,7 @@ public struct Config: Codable, Equatable {
         storageDir = try? c.decode(String.self, forKey: .storageDir)
         prompterOpacity = (try? c.decode(Double.self, forKey: .prompterOpacity)) ?? d.prompterOpacity
         prompterAutoAnswer = (try? c.decode(Bool.self, forKey: .prompterAutoAnswer)) ?? d.prompterAutoAnswer
+        prompterStyle = (try? c.decode(String.self, forKey: .prompterStyle)) ?? d.prompterStyle
         contextFile = (try? c.decode(String.self, forKey: .contextFile)) ?? d.contextFile
         userName = (try? c.decode(String.self, forKey: .userName)) ?? d.userName
         keepAudio = (try? c.decode(Bool.self, forKey: .keepAudio)) ?? d.keepAudio

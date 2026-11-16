@@ -752,6 +752,10 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Prompter") {
+                Picker("Prompter style", selection: $model.config.prompterStyle) {
+                    Text("Notch bar (while recording)").tag("notch")
+                    Text("Floating panel").tag("panel")
+                }
                 Picker("Prompter AI", selection: $model.config.prompterProvider) {
                     Text("Same as summaries").tag(ProviderKind?.none)
                     ForEach(ProviderKind.allCases.filter { $0 != .none }, id: \.self) { Text($0.label).tag(ProviderKind?.some($0)) }

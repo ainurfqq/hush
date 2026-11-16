@@ -37,6 +37,13 @@ final class AppModel: ObservableObject {
 
     private var recorder: Recorder?
     private var panel: PrompterPanel?
+    lazy var notch = NotchController(model: self)
+    var notchStyle: Bool { config.prompterStyle == "notch" }
+
+    /// Shows the answer UI the user picked: the notch bar (while recording) or the floating prompter.
+    func presentAnswer() {
+        if notchStyle && isRecording { notch.showQuestion() } else if !prompterVisible { showPrompter() }
+    }
     private var feeder: FileFeeder?
     var simStart: Date?
     private var lastQuestionAt = Date.distantPast
@@ -64,6 +71,7 @@ final class AppModel: ObservableObject {
                 self.liveNotes = ""; self.catchUp = []; self.askAnswer = nil; self.askText = ""
                 self.liveTitle = (try? Store.load(r.meetingID).title) ?? "Meeting"
                 self.openWindowAction?("live")
+                if self.notchStyle { self.notch.show() }
                 self.lastSound = Date(); self.silentWarning = false
                 self.timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.tick() }
                 self.prompterStatus = "Listening"
@@ -78,6 +86,7 @@ final class AppModel: ObservableObject {
         guard let r = recorder else { return }
         timer?.invalidate(); timer = nil
         isRecording = false; recorder = nil
+        notch.hide()
         prompterStatus = "Processing last meeting"
         var m = r.stop()
         if var mm = m {
@@ -136,7 +145,7 @@ final class AppModel: ObservableObject {
         answering = true; lastQuestionAt = Date(); prompterAskedAt = liveLines.last(where: { $0.question != nil })?.heardAt ?? Date()
         recorder?.liveLog("QUESTION caught: \(question)")
         prompterQuestion = question; prompterAnswer = ""; prompterStatus = "Drafting answer…"
-        if !prompterVisible { showPrompter() }
+        presentAnswer()
         let recent = liveLines.suffix(40).map { "\($0.who == "me" ? (config.userName.isEmpty ? "Me" : config.userName) : "Them"): \($0.text)" }.joined(separator: "\n")
         let ctxPath = (config.contextFile as NSString).expandingTildeInPath
         let ctx = config.contextFile.isEmpty ? "" : ((try? String(contentsOfFile: ctxPath, encoding: .utf8)) ?? "")
@@ -174,7 +183,7 @@ final class AppModel: ObservableObject {
     /// Notes mode: no AI needed. Shows the best matching pieces of the user's notes file.
     func answerFromNotes(_ question: String, reason: String?) {
         prompterQuestion = question; prompterAskedAt = Date()
-        if !prompterVisible { showPrompter() }
+        presentAnswer()
         let notes = notesText
         if notes.isEmpty {
             prompterAnswer = "No AI is set up, so Hush cannot write an answer. Add a notes file with prepared answers (Settings → Prompter → Context notes file) and Hush will show the matching points here."
@@ -249,7 +258,10 @@ final class AppModel: ObservableObject {
         panel?.orderFrontRegardless(); prompterVisible = true
     }
     func hidePrompter() { panel?.orderOut(nil); prompterVisible = false }
-    func togglePrompter() { prompterVisible ? hidePrompter() : showPrompter() }
+    func togglePrompter() {
+        if notchStyle && isRecording { notch.toggleQuestion(); return }
+        prompterVisible ? hidePrompter() : showPrompter()
+    }
     func setOpacity(_ v: Double) { config.prompterOpacity = v; panel?.alphaValue = CGFloat(v); try? config.save() }
     var prompterWindowNumber: Int? { panel?.windowNumber }
 
