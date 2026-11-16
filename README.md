@@ -54,6 +54,11 @@ it was absent from every standard capture path we tested: `screencapture` (still
 ScreenCaptureKit (screenshot, live stream, window capture) and the legacy CGWindowList API. Proof is in
 the QA report.
 
+Check it on your own Mac: menu bar → **Check prompter is hidden from screen capture**
+(or `~/Applications/Hush.app/Contents/MacOS/Hush --verify-hidden`). Hush captures the prompter area with ScreenCaptureKit
+three times: with the panel hidden, shown, and deliberately made capturable as a control. It reports "Hidden ✓" only
+when the shown capture matches the background and the control does not.
+
 It is **not** a promise of invisibility. Apple calls this setting legacy, and a meeting app can use its
 own capture method. Reports exist of Zoom and Teams capturing such windows on macOS 15. Before you rely
 on it, run a one-minute check: start a test call with yourself, share your **entire screen**, open the
