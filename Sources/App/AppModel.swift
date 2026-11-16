@@ -22,6 +22,18 @@ final class AppModel: ObservableObject {
     @Published var libQuery = ""
     @Published var settingsKey = ""
     @Published var settingsTest = ""
+    // Live meeting window
+    @Published var liveNotes = ""
+    @Published var catchUp: [String] = []
+    @Published var catchUpBusy = false
+    @Published var askText = ""
+    @Published var askAnswer: String?
+    @Published var askBusy = false
+    @Published var liveTitle = ""
+    @Published var prompterAskedAt: Date?
+    var recentQuestions: [LiveLine] { Array(liveLines.filter { $0.question != nil }.suffix(3)) }
+    /// Set by a SwiftUI view that has `openWindow` in its environment.
+    var openWindowAction: ((String) -> Void)?
 
     private var recorder: Recorder?
     private var panel: PrompterPanel?
@@ -49,6 +61,9 @@ final class AppModel: ObservableObject {
                 try r.start()
                 self.recorder = r; self.isRecording = true; self.recordingMode = mode
                 self.liveLines = []; self.prompterAnswer = ""; self.prompterQuestion = nil
+                self.liveNotes = ""; self.catchUp = []; self.askAnswer = nil; self.askText = ""
+                self.liveTitle = (try? Store.load(r.meetingID).title) ?? "Meeting"
+                self.openWindowAction?("live")
                 self.lastSound = Date(); self.silentWarning = false
                 self.timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.tick() }
                 self.prompterStatus = "Listening"
@@ -64,9 +79,14 @@ final class AppModel: ObservableObject {
         timer?.invalidate(); timer = nil
         isRecording = false; recorder = nil
         prompterStatus = "Processing last meeting"
-        let m = r.stop()
+        var m = r.stop()
+        if var mm = m {
+            if !liveNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { mm.userNotes = liveNotes }
+            if !liveTitle.isEmpty { mm.title = liveTitle }
+            try? Store.save(mm); m = mm
+        }
         reload()
-        if let m { process(m.id) }
+        if let m { libSelection = m.id; process(m.id) }
     }
 
     private func tick() {
@@ -82,17 +102,26 @@ final class AppModel: ObservableObject {
 
     // MARK: live transcript + prompter
 
-    func addLive(_ line: LiveLine) {
+    func addLive(_ incoming: LiveLine) {
+        var line = incoming
+        if line.who != "me" { line.question = QuestionDetector.question(in: line.text) }
         liveLines.append(line)
         if let s0 = simStart { print(String(format: "LINE_AT %.2f (audio clock) chunk@%.1f: %@", Date().timeIntervalSince(s0), line.t, line.text)); fflush(stdout) }
         if liveLines.count > 400 { liveLines.removeFirst(100) }
         recorder?.liveLog("\(line.who == "me" ? "Me" : "Them"): \(line.text)")
         guard line.who != "me", config.prompterAutoAnswer, (config.prompterProvider ?? config.provider) != .none,
-              var q = QuestionDetector.question(in: line.text) else { return }
+              var q = line.question else { return }
         // A short or cut-off question gets the line before it as context ("…for the launch. What do you think?").
         let others = liveLines.filter { $0.who != "me" }
         if q.split(separator: " ").count < 7, others.count >= 2 { q = others[others.count - 2].text + " " + q }
         answer(q)
+    }
+
+    /// QA only: add a line without triggering the AI.
+    func addLiveForDemo(_ incoming: LiveLine) {
+        var l = incoming
+        if l.who != "me" { l.question = QuestionDetector.question(in: l.text) }
+        liveLines.append(l)
     }
 
     func answerLastQuestion() {
@@ -103,7 +132,7 @@ final class AppModel: ObservableObject {
     func answer(_ question: String) {
         guard !answering, Date().timeIntervalSince(lastQuestionAt) > 2 else { return }
         guard let provider = AI.provider(config, forPrompter: true) else { prompterStatus = "Set an AI provider in Settings"; return }
-        answering = true; lastQuestionAt = Date()
+        answering = true; lastQuestionAt = Date(); prompterAskedAt = liveLines.last(where: { $0.question != nil })?.heardAt ?? Date()
         recorder?.liveLog("QUESTION caught: \(question)")
         prompterQuestion = question; prompterAnswer = ""; prompterStatus = "Drafting answer…"
         if !prompterVisible { showPrompter() }
@@ -135,6 +164,49 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func liveTranscript(since: Date? = nil) -> String {
+        let me = config.userName.isEmpty ? "Me" : config.userName
+        return liveLines.filter { since == nil || $0.heardAt >= since! }
+            .map { "\($0.who == "me" ? me : "Them"): \($0.text)" }.joined(separator: "\n")
+    }
+
+    /// "What did I miss?": bullets for the last 5 minutes.
+    func whatDidIMiss() {
+        guard !catchUpBusy else { return }
+        guard let p = AI.provider(config, forPrompter: true) else { catchUp = ["Set an AI provider in Settings first."]; return }
+        let recent = liveTranscript(since: Date().addingTimeInterval(-300))
+        guard !recent.isEmpty else { catchUp = ["Nothing was said in the last 5 minutes."]; return }
+        catchUpBusy = true
+        DispatchQueue.global().async {
+            let r = Result { try p.complete(system: LiveHelp.catchUpSystem, user: recent, fast: true) }
+            DispatchQueue.main.async {
+                self.catchUpBusy = false
+                switch r {
+                case .success(let t):
+                    self.catchUp = t.split(separator: "\n").map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "-•* ").union(.whitespaces)) }.filter { !$0.isEmpty }
+                    self.recorder?.liveLog("CATCH-UP: " + self.catchUp.joined(separator: " / "))
+                case .failure(let e): self.catchUp = ["AI error: \(e)"]
+                }
+            }
+        }
+    }
+
+    /// "Ask anything" about the meeting so far.
+    func askLive() {
+        let q = askText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty, !askBusy else { return }
+        guard let p = AI.provider(config, forPrompter: true) else { askAnswer = "Set an AI provider in Settings first."; return }
+        askBusy = true; askAnswer = nil
+        let t = liveTranscript()
+        DispatchQueue.global().async {
+            let r = Result { try p.complete(system: LiveHelp.askSystem, user: "Transcript so far:\n\(t.suffix(12000))\n\nQuestion: \(q)", fast: true) }
+            DispatchQueue.main.async {
+                self.askBusy = false
+                switch r { case .success(let a): self.askAnswer = a; case .failure(let e): self.askAnswer = "AI error: \(e)" }
+            }
+        }
+    }
+
     func showPrompter() {
         if panel == nil { panel = PrompterPanel(model: self) }
         panel?.orderFrontRegardless(); prompterVisible = true
@@ -153,6 +225,11 @@ final class AppModel: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             PrompterCheck.run(panel: p) { r, err in
                 self.hiddenCheck = r?.summary ?? err
+                if let r, r.valid {
+                    let f = DateFormatter(); f.dateFormat = "d MMM yyyy"
+                    self.config.lastHiddenCheck = (r.hidden ? "hidden" : "visible") + "|" + f.string(from: Date())
+                    self.saveConfig()
+                }
                 Log.write("prompter hidden check: \(self.hiddenCheck ?? "")")
                 done?(r)
             }

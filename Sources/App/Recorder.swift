@@ -6,6 +6,8 @@ struct LiveLine: Identifiable, Equatable {
     var t: Double
     var who: String   // "me" or "them"
     var text: String
+    var question: String? = nil
+    var heardAt = Date()
 }
 
 /// Records a meeting. Call mode = mic + system audio; room mode = mic only.

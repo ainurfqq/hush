@@ -20,7 +20,11 @@ public enum Summarizer {
     public static func summarize(_ m: Meeting, provider: AIProvider?, fallback: Bool = true) throws -> (MeetingSummary, String?) {
         if let p = provider {
             do {
-                let prompt = "Meeting: \(m.title)\nSpeakers: \(m.speakers.map(m.displayName).joined(separator: ", "))\n\nTranscript:\n\(transcriptText(m))"
+                var prompt = "Meeting: \(m.title)\nSpeakers: \(m.speakers.map(m.displayName).joined(separator: ", "))\n\n"
+                if let n = m.userNotes, !n.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    prompt += "The user's own notes from the meeting (treat as important hints, not as transcript):\n\(n)\n\n"
+                }
+                prompt += "Transcript:\n\(transcriptText(m))"
                 let raw = try p.complete(system: system, user: prompt, fast: false)
                 if var s = parse(raw, provider: p.name) {
                     s.actionItems = s.actionItems.filter { !$0.task.isEmpty }
@@ -144,6 +148,19 @@ public enum QuestionDetector {
         }
         return nil
     }
+}
+
+/// "What did I miss?" and "Ask anything" during a live meeting.
+public enum LiveHelp {
+    public static let catchUpSystem = """
+    You help someone who lost focus for a moment in a meeting. From the recent transcript, write at most 4 short bullet \
+    points: decisions, numbers, questions aimed at them, and new tasks with owner and date. Use the meeting's main \
+    language. Facts from the transcript only. Start each line with "- ". No intro.
+    """
+    public static let askSystem = """
+    Answer a question about an ongoing meeting using only the transcript given. At most 3 short sentences, in the \
+    language of the question. If the transcript does not say, answer that it was not said.
+    """
 }
 
 /// Short answers for the prompter.

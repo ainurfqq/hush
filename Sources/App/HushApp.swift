@@ -15,6 +15,10 @@ struct HushApp: App {
         .menuBarExtraStyle(.window)
 
         Window("Hush", id: "library") { LibraryView().environmentObject(AppDelegate.model) }
+        Window("Hush Live", id: "live") { LiveWindow().environmentObject(AppDelegate.model) }
+            .defaultSize(width: 640, height: 780)
+        Window("Set up Hush", id: "setup") { SetupView().environmentObject(AppDelegate.model) }
+            .windowResizability(.contentSize)
         Window("Hush Settings", id: "settings") { SettingsView().environmentObject(AppDelegate.model) }
             .windowResizability(.contentSize)
     }
@@ -22,10 +26,15 @@ struct HushApp: App {
 
 struct MenuBarIcon: View {
     @EnvironmentObject var model: AppModel
+    @Environment(\.openWindow) var openWindow
     var body: some View {
-        Image(systemName: model.isRecording ? "record.circle.fill" : "waveform")
-            .symbolRenderingMode(.palette)
-            .foregroundStyle(model.isRecording ? Color.red : Color.primary)
+        Image(nsImage: MenuBarGlyph.image(recording: model.isRecording))
+            .onAppear {
+                model.openWindowAction = { id in openWindow(id: id); NSApp.activate(ignoringOtherApps: true) }
+                if !model.config.setupDone && !CommandLine.arguments.contains(where: { $0.hasPrefix("--") }) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { model.openWindowAction?("setup") }
+                }
+            }
     }
 }
 
@@ -33,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     static let model = AppModel()
 
     func applicationDidFinishLaunching(_ n: Notification) {
+        Theme.registerFonts()
         NSApp.setActivationPolicy(.accessory)
         let m = Self.model
         let mods = controlKey | optionKey
@@ -72,6 +82,12 @@ enum TestHooks {
             if let n = m.prompterWindowNumber { print("PROMPTER_WINDOW \(n)"); fflush(stdout) }
             quit(after: Double(argv[i + 1]) ?? 10)
         }
+        if argv.contains("--demo") { demo(m); if argv.contains("--prompter") { m.showPrompter() } }
+        if let i = argv.firstIndex(of: "--open"), i + 1 < argv.count {
+            let id = argv[i + 1]
+            if let j = argv.firstIndex(of: "--select"), j + 1 < argv.count { m.libSelection = argv[j + 1] }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { m.openWindowAction?(id) }
+        }
         if argv.contains("--verify-hidden") {
             m.prompterQuestion = "Self-test"; m.prompterAnswer = "Hush prompter self-test: this text must not appear in screen captures."
             m.checkPrompterHidden { r in
@@ -107,6 +123,21 @@ enum TestHooks {
             }
             marks.append(("start", Date()))
         }
+    }
+
+    /// Fills the live state with sample lines so the live window and prompter can be screenshotted in QA.
+    static func demo(_ m: AppModel) {
+        m.liveTitle = "Campaign kickoff"
+        for (who, t) in [("them", "Budget kita 45 juta per bulan, sekitar 60% untuk iklan berbayar."), ("them", "That split works for us."),
+                         ("them", "How do you measure success?"), ("them", "What is your timeline for the first campaign?"),
+                         ("me", "5 Januari masih realistis. Minggu depan kita finalisasi strategi.")] {
+            m.addLiveForDemo(LiveLine(t: 0, who: who, text: t))
+        }
+        m.catchUp = ["Budget agreed: Rp45 juta a month, about 60% for ads.", "Daniel asked for the timeline. You said 5 January.", "New task: Rina sends the revised proposal by Fri 21 Nov."]
+        m.prompterQuestion = "What is your timeline for the first campaign?"
+        m.prompterAskedAt = Date().addingTimeInterval(-4)
+        m.prompterAnswer = "Launch on 5 January is realistic. Strategy is final next week, content is ready by end of December."
+        m.prompterStatus = "Answered in 5.0 s · claude-cli"
     }
 
     static func waitIdle(_ m: AppModel) {

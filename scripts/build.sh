@@ -24,6 +24,7 @@ swiftc "${FLAGS[@]}" -parse-as-library -module-name Hush Sources/Core/*.swift So
 
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp scripts/fetch-engines.sh scripts/engines.lock "$APP/Contents/Resources/"
+mkdir -p "$APP/Contents/Resources/Fonts" && cp Resources/Fonts/* "$APP/Contents/Resources/Fonts/"
 [ -f Resources/AppIcon.icns ] && cp Resources/AppIcon.icns "$APP/Contents/Resources/"
 
 # Ad-hoc signature (no Apple Developer account). Stable identifier keeps permission prompts tied to the bundle id.

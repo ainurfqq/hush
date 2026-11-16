@@ -5,7 +5,7 @@ import ScreenCaptureKit
 // Usage: capture_check <owner-name> <out.png>
 let owner = CommandLine.arguments[1], out = CommandLine.arguments[2]
 let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as! [[String: Any]]
-let wins = info.filter { ($0[kCGWindowOwnerName as String] as? String) == owner && ($0[kCGWindowLayer as String] as? Int ?? 0) > 0 }
+let wins = info.filter { ($0[kCGWindowOwnerName as String] as? String) == owner && ($0[kCGWindowLayer as String] as? Int ?? 0) >= 0 && (($0[kCGWindowBounds as String] as? [String: Double])?["Height"] ?? 0) > 60 }
 guard let w = wins.max(by: { (($0[kCGWindowBounds as String] as? [String: Double])?["Width"] ?? 0) < (($1[kCGWindowBounds as String] as? [String: Double])?["Width"] ?? 0) }),
       let b = w[kCGWindowBounds as String] as? [String: Double] else { print("NO_WINDOW"); exit(2) }
 let rect = CGRect(x: b["X"]!, y: b["Y"]!, width: b["Width"]!, height: b["Height"]!)

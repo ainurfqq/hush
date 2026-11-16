@@ -66,6 +66,8 @@ public struct Meeting: Codable, Equatable {
     public var summary: MeetingSummary?
     public var status: MeetingStatus
     public var error: String?
+    /// What the user typed in "My notes" during the meeting. Used by the summary.
+    public var userNotes: String?
 
     public init(id: String, title: String, createdAt: Date = Date(), duration: Double = 0, source: String,
                 audioFiles: [String], speakerNames: [String: String] = [:], segments: [Segment] = [],

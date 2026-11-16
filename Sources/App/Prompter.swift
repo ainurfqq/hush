@@ -7,7 +7,7 @@ import Carbon.HIToolbox
 /// Meeting apps can use their own capture paths, so the UI never promises "undetectable".
 final class PrompterPanel: NSPanel {
     init(model: AppModel) {
-        super.init(contentRect: NSRect(x: 0, y: 0, width: 460, height: 230),
+        super.init(contentRect: NSRect(x: 0, y: 0, width: 440, height: 380),
                    styleMask: [.nonactivatingPanel, .titled, .resizable, .fullSizeContentView, .utilityWindow],
                    backing: .buffered, defer: false)
         // QA control only: HUSH_QA_CAPTURABLE=1 makes the panel capturable, to prove it is on screen in tests.
@@ -37,33 +37,69 @@ final class PrompterPanel: NSPanel {
 
 struct PrompterView: View {
     @EnvironmentObject var model: AppModel
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Circle().fill(model.isRecording ? Color.red : Color.secondary).frame(width: 7, height: 7)
-                Text(model.prompterStatus).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Circle().fill(model.isRecording ? Color(red: 1, green: 0.42, blue: 0.44) : Color.gray).frame(width: 8, height: 8)
+                Text(header).font(.system(size: 12)).foregroundStyle(Color.white.opacity(0.72)).lineLimit(1)
                 Spacer()
-                Button { model.answerLastQuestion() } label: { Image(systemName: "sparkles") }
-                    .buttonStyle(.borderless).help("Answer the last question now (⌃⌥A)")
-                Slider(value: Binding(get: { model.config.prompterOpacity }, set: { model.setOpacity($0) }), in: 0.3...1)
-                    .frame(width: 70).controlSize(.mini).help("Opacity")
+                if model.config.lastHiddenCheck.hasPrefix("hidden") {
+                    Text("Hidden ✓").font(.system(size: 11, weight: .semibold)).foregroundStyle(Color(red: 0.61, green: 0.89, blue: 0.71))
+                        .padding(.horizontal, 8).padding(.vertical, 3).background(Color(red: 0.18, green: 0.62, blue: 0.36).opacity(0.25), in: Capsule())
+                }
             }
             if let q = model.prompterQuestion {
-                Text(q).font(.callout).italic().foregroundStyle(.secondary).lineLimit(3)
+                Text("“\(q)”").font(.system(size: 14).italic()).foregroundStyle(Color.white.opacity(0.82)).lineLimit(3)
             }
-            ScrollView {
-                Text(model.prompterAnswer.isEmpty ? "Answers to questions from others appear here." : model.prompterAnswer)
-                    .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(model.prompterAnswer.isEmpty ? .secondary : .primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
+            ScrollView(showsIndicators: false) {
+                Text(model.prompterAnswer.isEmpty ? "When someone asks you a question, a suggested answer appears here." : model.prompterAnswer)
+                    .font(.system(size: model.prompterAnswer.isEmpty ? 15 : 19, weight: model.prompterAnswer.isEmpty ? .regular : .semibold))
+                    .lineSpacing(3)
+                    .foregroundStyle(model.prompterAnswer.isEmpty ? Color.white.opacity(0.6) : .white)
+                    .frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            Text("Hidden from standard macOS screen capture. Check your meeting app once (see README).")
-                .font(.system(size: 9)).foregroundStyle(.tertiary)
+            .frame(minHeight: 110, maxHeight: .infinity)
+            .layoutPriority(1)
+            let others = model.recentQuestions.compactMap(\.question).filter { $0 != model.prompterQuestion }.suffix(2)
+            if !others.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("WRONG QUESTION? PICK ONE").font(.system(size: 10, weight: .semibold)).kerning(0.5).foregroundStyle(Color.white.opacity(0.6))
+                    HStack(spacing: 6) {
+                        ForEach(Array(others), id: \.self) { q in
+                            Button { model.answer(q) } label: {
+                                Text("“\(q)”").font(.system(size: 12)).lineLimit(1).foregroundStyle(.white)
+                                    .padding(.horizontal, 10).padding(.vertical, 6)
+                                    .background(Color.white.opacity(0.08), in: Capsule()).overlay(Capsule().stroke(Color.white.opacity(0.18)))
+                            }.buttonStyle(.plain)
+                        }
+                    }
+                }
+                .padding(.top, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .overlay(Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1), alignment: .top)
+            }
+            HStack(spacing: 10) {
+                Text(model.prompterStatus).font(.system(size: 11)).foregroundStyle(Color.white.opacity(0.6)).lineLimit(1)
+                Spacer()
+                Button { model.answerLastQuestion() } label: {
+                    Text("Again ⌃⌥A").font(.system(size: 12)).foregroundStyle(.white).padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+                }.buttonStyle(.plain).help("Answer the last question from others now")
+                Slider(value: Binding(get: { model.config.prompterOpacity }, set: { model.setOpacity($0) }), in: 0.3...1)
+                    .frame(width: 64).controlSize(.mini).help("Opacity")
+            }
         }
-        .padding(14)
-        .padding(.top, 10)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .padding(16).padding(.top, 8)
+        .background(RoundedRectangle(cornerRadius: 16).fill(Theme.night.opacity(0.92)))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.12)))
+        .environment(\.colorScheme, .dark)
+    }
+
+    var header: String {
+        guard model.prompterQuestion != nil, let t = model.prompterAskedAt else { return model.isRecording ? "Listening for questions" : "Prompter" }
+        return "They asked · \(ago(t))"
     }
 }
 

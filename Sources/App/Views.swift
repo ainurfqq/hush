@@ -1,65 +1,345 @@
 import SwiftUI
 import AppKit
+import AVFoundation
 
-// MARK: menu bar
+// MARK: menu bar popover
 
 struct MenuContent: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.openWindow) var openWindow
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if model.isRecording {
-                HStack {
-                    Circle().fill(.red).frame(width: 9, height: 9)
-                    Text("Recording \(model.recordingMode == .call ? "call" : "room") · \(formatTime(model.elapsed))").font(.headline)
-                }
-                LevelRow(label: "Mic (you)", level: model.micLevel)
-                if model.recordingMode == .call { LevelRow(label: "Call audio", level: model.sysLevel) }
-                if model.silentWarning {
-                    Label("Hush hears nothing for 30 s. Check the mic and the call audio.", systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange).font(.caption)
-                }
-                if let last = model.liveLines.last {
-                    Text("\(last.who == "me" ? "You" : "Them"): \(last.text)").font(.caption).lineLimit(3).foregroundStyle(.secondary)
-                }
-                Button("Stop and make notes") { model.stopRecording() }.keyboardShortcut(.defaultAction)
-            } else {
-                Text("Hush").font(.headline)
-                Button("Record online meeting (mic + call audio)") { model.startRecording(mode: .call) }
-                Button("Record in-room meeting (mic only)") { model.startRecording(mode: .room) }
-                Button("Import audio file…") { model.importAudio() }
-            }
-            Divider()
-            Button(model.prompterVisible ? "Hide prompter  ⌃⌥H" : "Show prompter  ⌃⌥H") { model.togglePrompter() }
-            Button("Check prompter is hidden from screen capture") { model.checkPrompterHidden() }
-            if let h = model.hiddenCheck { Text(h).font(.caption).foregroundStyle(h.hasPrefix("Hidden") ? .green : .orange).lineLimit(4) }
-            Button("Copy consent message") { model.copyConsent() }
-            Button("Open Hush") { openWindow(id: "library"); NSApp.activate(ignoringOtherApps: true) }
-            Button("Settings…") { openWindow(id: "settings"); NSApp.activate(ignoringOtherApps: true) }
+        VStack(alignment: .leading, spacing: 14) {
+            if model.isRecording { recording } else { idle }
             if let e = model.lastError {
-                Text(e).font(.caption).foregroundStyle(.red).lineLimit(4)
-                Button("Dismiss") { model.lastError = nil }.font(.caption)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(e).font(.caption).foregroundStyle(Theme.rec).lineLimit(4)
+                    Button("Dismiss") { model.lastError = nil }.buttonStyle(.link).font(.caption)
+                }
             }
             Divider()
-            Button("Quit Hush") { NSApp.terminate(nil) }
+            HStack {
+                Button("Open notes") { open("library") }.buttonStyle(.link)
+                Spacer()
+                Button("Copy consent message") { model.copyConsent() }.buttonStyle(.link)
+                Spacer()
+                Button("Settings") { open("settings") }.buttonStyle(.link)
+            }.font(.system(size: 12, weight: .medium)).tint(Theme.indigo)
+            HStack {
+                Spacer()
+                Button("Quit Hush") { NSApp.terminate(nil) }.buttonStyle(.link).font(.caption).foregroundStyle(Theme.ink3)
+            }
         }
-        .padding(14)
-        .frame(width: 320)
+        .padding(16)
+        .frame(width: 340)
+        .background(Theme.panel)
+        .onAppear { model.openWindowAction = { id in openWindow(id: id); NSApp.activate(ignoringOtherApps: true) } }
     }
+
+    func open(_ id: String) { openWindow(id: id); NSApp.activate(ignoringOtherApps: true) }
+
+    @ViewBuilder var idle: some View {
+        HStack(spacing: 10) {
+            HushGlyph.onLight.frame(width: 30, height: 27)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Hush").font(.system(size: 16, weight: .semibold)).kerning(-0.3)
+                Text("Ready · AI: \(model.config.provider.label.components(separatedBy: " (").first ?? "")")
+                    .font(.system(size: 12)).foregroundStyle(Theme.ink3).lineLimit(1)
+            }
+            Spacer()
+            Pill(text: "On this Mac", fg: Theme.ok, bg: Theme.okSoft)
+        }
+        Picker("Recording mode", selection: $model.recordingMode) {
+            Text("Online call").tag(Recorder.Mode.call)
+            Text("In the room").tag(Recorder.Mode.room)
+        }
+        .pickerStyle(.segmented).labelsHidden()
+        Text(model.recordingMode == .call ? "Hears your mic as \"Me\" and the call as everyone else. No bot joins."
+                                          : "Uses the mic only and tells the voices in the room apart.")
+            .font(.system(size: 12)).foregroundStyle(Theme.ink3).fixedSize(horizontal: false, vertical: true)
+        Button { model.startRecording(mode: model.recordingMode) } label: {
+            HStack(spacing: 8) { Circle().fill(.white).frame(width: 10, height: 10); Text("Start recording"); Text("⌃⌥R").opacity(0.8).font(.system(size: 12)) }
+                .frame(maxWidth: .infinity, minHeight: 40)
+        }
+        .buttonStyle(FilledButton(bg: Theme.indigo))
+        Button { model.importAudio() } label: { Text("Import an audio file…").frame(maxWidth: .infinity, minHeight: 36) }
+            .buttonStyle(OutlineButton())
+        Divider()
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Button { model.togglePrompter() } label: {
+                    Text("Prompter ").font(.system(size: 13, weight: .semibold)) + Text(model.prompterVisible ? "on · ⌃⌥H" : "off · ⌃⌥H").font(.system(size: 13)).foregroundColor(Theme.ink3)
+                }.buttonStyle(.plain)
+                hiddenStatus
+            }
+            Spacer()
+            Toggle("Auto-answer", isOn: Binding(get: { model.config.prompterAutoAnswer }, set: { model.config.prompterAutoAnswer = $0; model.saveConfig() }))
+                .toggleStyle(.checkbox).font(.system(size: 12))
+        }
+        let recent = Array(model.meetings.filter { $0.status == .ready }.prefix(3))
+        if !recent.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("RECENT").font(.system(size: 11, weight: .semibold)).kerning(0.6).foregroundStyle(Theme.ink3)
+                ForEach(recent, id: \.id) { m in
+                    Button { model.libSelection = m.id; open("library") } label: {
+                        HStack {
+                            Text(m.title).font(Theme.serif(17)).lineLimit(1)
+                            Spacer()
+                            Text("\(formatTime(m.duration)) · \(m.summary?.actionItems.count ?? 0) tasks").font(.system(size: 12)).foregroundStyle(Theme.ink3)
+                        }.contentShape(Rectangle())
+                    }.buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder var hiddenStatus: some View {
+        let parts = model.config.lastHiddenCheck.split(separator: "|").map(String.init)
+        if let h = model.hiddenCheck {
+            Text(h).font(.system(size: 11)).foregroundStyle(h.hasPrefix("Hidden") ? Theme.ok : Theme.rec).lineLimit(3)
+        } else if parts.count == 2 {
+            Text(parts[0] == "hidden" ? "Hidden from screen capture · checked \(parts[1])" : "Visible in screen capture! · \(parts[1])")
+                .font(.system(size: 12)).foregroundStyle(parts[0] == "hidden" ? Theme.ok : Theme.rec)
+        } else {
+            Button("Check it is hidden from screen share") { model.checkPrompterHidden() }.buttonStyle(.link).font(.system(size: 12)).tint(Theme.indigo)
+        }
+    }
+
+    @ViewBuilder var recording: some View {
+        HStack(spacing: 10) {
+            Circle().fill(Theme.rec).frame(width: 11, height: 11).overlay(Circle().stroke(Theme.rec.opacity(0.18), lineWidth: 6))
+            Text("Recording").font(Theme.serif(22))
+            Text(formatTime(model.elapsed)).font(.system(size: 14).monospacedDigit()).foregroundStyle(Theme.ink3)
+            Spacer()
+            Pill(text: model.recordingMode == .call ? "Online call" : "In the room")
+        }
+        VStack(alignment: .leading, spacing: 6) {
+            LevelRow(label: "You", level: model.micLevel)
+            if model.recordingMode == .call { LevelRow(label: "Call audio", level: model.sysLevel) }
+            if model.silentWarning {
+                Label("Hush hears nothing for 30 s. Check the mic and the call audio.", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange).font(.caption)
+            } else {
+                Text("Hearing you\(model.recordingMode == .call ? " and the call" : "")").font(.system(size: 12)).foregroundStyle(Theme.ok)
+            }
+        }
+        if let q = model.recentQuestions.last, let qt = q.question {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack { Pill(text: "Question caught", fg: Theme.indigo, bg: Theme.indigoSoft); Text(ago(q.heardAt)).font(.system(size: 12)).foregroundStyle(Theme.ink3) }
+                Text("“\(qt)”").font(.system(size: 14)).fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.indigoSoft.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
+        }
+        Button { open("live") } label: { Text("Open live window").frame(maxWidth: .infinity, minHeight: 34) }.buttonStyle(OutlineButton())
+        Button { model.stopRecording() } label: {
+            HStack(spacing: 8) { RoundedRectangle(cornerRadius: 2).fill(.white).frame(width: 10, height: 10); Text("Stop and make notes") }
+                .frame(maxWidth: .infinity, minHeight: 40)
+        }.buttonStyle(FilledButton(bg: Theme.ink))
+        Text("Notes in a few minutes, on this Mac").font(.system(size: 12)).foregroundStyle(Theme.ink3).frame(maxWidth: .infinity)
+    }
+}
+
+func ago(_ d: Date) -> String {
+    let s = Int(Date().timeIntervalSince(d))
+    return s < 60 ? "\(max(1, s)) s ago" : "\(s / 60) min ago"
 }
 
 struct LevelRow: View {
     let label: String; let level: Float
     var body: some View {
-        HStack {
-            Text(label).font(.caption).frame(width: 80, alignment: .leading)
-            ProgressView(value: Double(min(1, level * 8))).tint(level > 0.01 ? .green : .gray)
+        HStack(spacing: 10) {
+            Text(label).font(.system(size: 12)).foregroundStyle(Theme.ink2).frame(width: 70, alignment: .leading)
+            GeometryReader { g in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Theme.line)
+                    Capsule().fill(level > 0.01 ? Theme.ok : Theme.ink3).frame(width: g.size.width * CGFloat(min(1, level * 8)))
+                }
+            }.frame(height: 6)
         }
     }
 }
 
-// MARK: library
+struct FilledButton: ButtonStyle {
+    var bg: Color
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .background(bg.opacity(configuration.isPressed ? 0.85 : 1), in: RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+struct OutlineButton: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.ink)
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .background(Color.white.opacity(configuration.isPressed ? 0.7 : 1), in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.line))
+    }
+}
+
+// MARK: live meeting window
+
+struct LiveWindow: View {
+    @EnvironmentObject var model: AppModel
+    @ObservedObject var tab = LiveTab.shared
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                HushGlyph(dot: model.isRecording ? Theme.rec : Theme.indigo, dotScale: model.isRecording ? 1.35 : 1).frame(width: 24, height: 22)
+                Text(model.isRecording ? "Recording" : "Not recording").font(.system(size: 14, weight: .semibold))
+                if model.isRecording { Text(formatTime(model.elapsed)).font(.system(size: 14).monospacedDigit()).foregroundStyle(Theme.ink3) }
+                Pill(text: model.recordingMode == .call ? "Online call" : "In the room")
+                Spacer()
+                Button(model.prompterVisible ? "Hide prompter ⌃⌥H" : "Show prompter ⌃⌥H") { model.togglePrompter() }.buttonStyle(OutlineButton()).frame(height: 30)
+            }
+            .padding(.horizontal, 18).padding(.vertical, 12)
+            Divider().overlay(Theme.line)
+
+            VStack(alignment: .leading, spacing: 4) {
+                TextField("Meeting title", text: $model.liveTitle).textFieldStyle(.plain).font(Theme.serif(32))
+                Text(model.recordingMode == .call ? "You and the call · notes stay on this Mac" : "Everyone in the room · notes stay on this Mac")
+                    .font(.system(size: 13)).foregroundStyle(Theme.ink3)
+            }
+            .padding(.horizontal, 24).padding(.top, 16).frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(spacing: 22) {
+                tabButton("My notes", 0); tabButton("Live transcript", 1)
+                Spacer()
+            }
+            .padding(.horizontal, 24).padding(.top, 10)
+            Divider().overlay(Theme.line)
+
+            Group {
+                if tab.index == 0 { notes } else { transcript }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            Divider().overlay(Theme.line)
+            bottomBar
+        }
+        .background(Theme.panel)
+        .frame(minWidth: 560, minHeight: 640)
+    }
+
+    func tabButton(_ title: String, _ i: Int) -> some View {
+        Button { tab.index = i } label: {
+            VStack(spacing: 8) {
+                Text(title).font(.system(size: 14, weight: tab.index == i ? .semibold : .medium)).foregroundStyle(tab.index == i ? Theme.ink : Theme.ink2)
+                Rectangle().fill(tab.index == i ? Theme.indigo : .clear).frame(height: 2)
+            }.fixedSize()
+        }.buttonStyle(.plain)
+    }
+
+    var notes: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Type what matters to you. The summary uses your notes as hints.").font(.system(size: 12)).foregroundStyle(Theme.ink3)
+            TextEditor(text: $model.liveNotes).font(.system(size: 15)).scrollContentBackground(.hidden)
+                .padding(8).background(Color.white, in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.line))
+        }.padding(20)
+    }
+
+    var transcript: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    if model.liveLines.isEmpty {
+                        Text(model.isRecording ? "Listening… lines appear a few seconds after people speak." : "Start a recording from the menu bar.")
+                            .font(.system(size: 14)).foregroundStyle(Theme.ink3).padding(.top, 8)
+                    }
+                    ForEach(model.liveLines) { l in
+                        HStack(alignment: .top, spacing: 12) {
+                            Text(l.who == "me" ? "You" : "Them").font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(l.who == "me" ? Theme.ink : Theme.rgb(0x7A3E06)).frame(width: 52, alignment: .leading)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(l.text).font(.system(size: 15)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                                if l.question != nil {
+                                    Text(model.config.prompterAutoAnswer ? "Question · answer is on the prompter" : "Question · press ⌃⌥A for an answer")
+                                        .font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.indigo)
+                                }
+                            }
+                        }
+                        .padding(l.question != nil ? 10 : 0)
+                        .background(l.question != nil ? Theme.indigoSoft : .clear, in: RoundedRectangle(cornerRadius: 10))
+                        .id(l.id)
+                    }
+                    if model.catchUpBusy || !model.catchUp.isEmpty { catchUpCard.id("catchup") }
+                    if model.askBusy || model.askAnswer != nil { askCard.id("ask") }
+                }
+                .padding(20).frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .onChange(of: model.liveLines.count) { _ in if let last = model.liveLines.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } } }
+            .onChange(of: model.catchUp) { _ in withAnimation { proxy.scrollTo("catchup", anchor: .bottom) } }
+            .onChange(of: model.askAnswer) { _ in withAnimation { proxy.scrollTo("ask", anchor: .bottom) } }
+        }
+    }
+
+    var catchUpCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("What you ").font(Theme.serif(22)) + Text("missed").font(Theme.serif(22, italic: true))
+                Text("last 5 minutes").font(.system(size: 12)).foregroundStyle(Theme.ink3)
+                Spacer()
+                if !model.catchUpBusy { Button("Close") { model.catchUp = [] }.buttonStyle(.link).font(.caption).tint(Theme.indigo) }
+            }
+            if model.catchUpBusy { ProgressView().controlSize(.small) }
+            ForEach(model.catchUp, id: \.self) { b in
+                HStack(alignment: .top, spacing: 8) { Text("•"); Text(b).fixedSize(horizontal: false, vertical: true) }.font(.system(size: 14))
+            }
+        }
+        .padding(14).frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.rgb(0xF7F6FE), in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.rgb(0xE2DFF7)))
+    }
+
+    var askCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("You asked").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.ink3)
+            if model.askBusy { ProgressView().controlSize(.small) }
+            if let a = model.askAnswer { Text(a).font(.system(size: 14)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) }
+        }
+        .padding(14).frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.line))
+    }
+
+    var bottomBar: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 4) {
+                Text("Tell everyone you are taking notes.").foregroundStyle(Theme.ink3)
+                Button("Copy consent message") { model.copyConsent() }.buttonStyle(.link).tint(Theme.indigo)
+            }.font(.system(size: 12))
+            HStack(spacing: 8) {
+                if model.isRecording {
+                    Button { model.stopRecording() } label: {
+                        HStack(spacing: 8) { RoundedRectangle(cornerRadius: 2).fill(.white).frame(width: 9, height: 9); Text("Stop") }
+                            .padding(.horizontal, 16).frame(minHeight: 40)
+                    }.buttonStyle(FilledButton(bg: Theme.ink))
+                } else {
+                    Button { model.startRecording(mode: model.recordingMode) } label: {
+                        HStack(spacing: 8) { Circle().fill(.white).frame(width: 9, height: 9); Text("Record") }.padding(.horizontal, 16).frame(minHeight: 40)
+                    }.buttonStyle(FilledButton(bg: Theme.indigo))
+                }
+                TextField("Ask anything about this meeting", text: $model.askText)
+                    .textFieldStyle(.plain).font(.system(size: 14)).padding(.horizontal, 14).frame(minHeight: 40)
+                    .background(Color.white, in: Capsule()).overlay(Capsule().stroke(Theme.line))
+                    .onSubmit { model.askLive() }
+                Button { model.whatDidIMiss(); tab.index = 1 } label: { Text("What did I miss?").padding(.horizontal, 14).frame(minHeight: 40) }
+                    .buttonStyle(FilledButton(bg: Theme.indigo)).disabled(model.catchUpBusy)
+            }
+        }
+        .padding(.horizontal, 18).padding(.vertical, 12)
+    }
+}
+
+final class LiveTab: ObservableObject {
+    static let shared = LiveTab()
+    @Published var index = 1
+}
+
+// MARK: notes window
 
 struct LibraryView: View {
     @EnvironmentObject var model: AppModel
@@ -69,47 +349,90 @@ struct LibraryView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
-            List(filtered, id: \.id, selection: $model.libSelection) { m in
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(m.title).lineLimit(1)
-                    HStack {
-                        Text(m.createdAt, style: .date); Text(formatTime(m.duration))
-                        if let b = model.busy[m.id] { Text(b).foregroundStyle(.orange) }
-                        else if m.status != .ready { Text(m.status.rawValue).foregroundStyle(.secondary) }
-                    }.font(.caption).foregroundStyle(.secondary)
+        HStack(spacing: 0) {
+            sidebar.frame(width: 280)
+            PanelCard {
+                Group {
+                    if let id = model.libSelection, let m = model.meetings.first(where: { $0.id == id }) { MeetingDetail(st: model.detailState(m)).id(m.id) }
+                    else {
+                        VStack(spacing: 10) {
+                            HushGlyph.onLight.frame(width: 64, height: 58).opacity(0.5)
+                            Text(model.meetings.isEmpty ? "No meetings yet" : "Pick a meeting").font(Theme.serif(28))
+                            Text("Record one from the menu bar, or import an audio file.").font(.system(size: 13)).foregroundStyle(Theme.ink3)
+                        }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .searchable(text: $model.libQuery, prompt: "Search meetings")
-            .navigationSplitViewColumnWidth(min: 220, ideal: 260)
-            .toolbar {
-                ToolbarItem { Button { model.importAudio() } label: { Label("Import", systemImage: "square.and.arrow.down") } }
-                ToolbarItem { Button { model.toggleRecording() } label: { Label(model.isRecording ? "Stop" : "Record", systemImage: model.isRecording ? "stop.circle.fill" : "record.circle") } }
-            }
-        } detail: {
-            if model.isRecording && model.libSelection == nil { LiveView() }
-            else if let id = model.libSelection, let m = model.meetings.first(where: { $0.id == id }) { MeetingDetail(st: model.detailState(m)).id(m.id) }
-            else { Text(model.meetings.isEmpty ? "No meetings yet. Record one from the menu bar, or import an audio file." : "Pick a meeting.")
-                .foregroundStyle(.secondary) }
+            .padding([.top, .bottom, .trailing], 12)
         }
-        .frame(minWidth: 820, minHeight: 520)
+        .background(Theme.paper)
+        .frame(minWidth: 960, minHeight: 600)
         .onAppear { model.reload() }
     }
-}
 
-struct LiveView: View {
-    @EnvironmentObject var model: AppModel
-    var body: some View {
-        ScrollViewReader { proxy in
-            List(model.liveLines) { l in
-                HStack(alignment: .top) {
-                    Text(l.who == "me" ? "You" : "Them").bold().frame(width: 44, alignment: .leading)
-                    Text(l.text).textSelection(.enabled)
-                }.id(l.id)
+    var sidebar: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 8) {
+                HushGlyph.onLight.frame(width: 28, height: 25)
+                Text("Hush").font(.system(size: 17, weight: .semibold)).kerning(-0.3)
+                Spacer()
+                Button { model.toggleRecording() } label: {
+                    Text(model.isRecording ? "■ Stop" : "● Record").padding(.horizontal, 10).frame(minHeight: 30)
+                }.buttonStyle(FilledButton(bg: model.isRecording ? Theme.ink : Theme.indigo))
             }
-            .onChange(of: model.liveLines.count) { _ in if let last = model.liveLines.last { proxy.scrollTo(last.id) } }
+            TextField("Search words, people, tasks", text: $model.libQuery)
+                .textFieldStyle(.plain).font(.system(size: 13)).padding(.horizontal, 10).frame(minHeight: 34)
+                .background(Color.white, in: RoundedRectangle(cornerRadius: 8)).overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.line))
+            ScrollView {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(groups, id: \.0) { g in
+                        Text(g.0.uppercased()).font(.system(size: 11, weight: .semibold)).kerning(0.6).foregroundStyle(Theme.ink3).padding(.top, 8).padding(.horizontal, 8)
+                        ForEach(g.1, id: \.id) { m in row(m) }
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+            HStack {
+                Button { model.importAudio() } label: { Label("Import audio", systemImage: "square.and.arrow.down") }.buttonStyle(.link).tint(Theme.ink2)
+                Spacer()
+            }.font(.system(size: 12))
+            let open = model.meetings.reduce(0) { $0 + ($1.summary?.actionItems.filter { !$0.done }.count ?? 0) }
+            Text("Open tasks across meetings: \(open)").font(.system(size: 12)).foregroundStyle(Theme.ink3)
         }
-        .navigationTitle("Live · \(formatTime(model.elapsed))")
+        .padding(.horizontal, 14).padding(.vertical, 18)
+    }
+
+    var groups: [(String, [Meeting])] {
+        let cal = Calendar.current
+        var out: [(String, [Meeting])] = []
+        for m in filtered {
+            let key = cal.isDateInToday(m.createdAt) ? "Today" : cal.isDateInYesterday(m.createdAt) ? "Yesterday" : {
+                let f = DateFormatter(); f.dateFormat = "EEE d MMM"; return f.string(from: m.createdAt) }()
+            if let i = out.firstIndex(where: { $0.0 == key }) { out[i].1.append(m) } else { out.append((key, [m])) }
+        }
+        return out
+    }
+
+    func row(_ m: Meeting) -> some View {
+        let selected = model.libSelection == m.id
+        let f = DateFormatter(); f.dateFormat = "HH:mm"
+        return Button { model.libSelection = m.id } label: {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(m.title).font(Theme.serif(18)).foregroundStyle(Theme.ink).lineLimit(1)
+                HStack(spacing: 6) {
+                    Text("\(f.string(from: m.createdAt)) · \(formatTime(m.duration)) · \(m.speakers.count) speaker\(m.speakers.count == 1 ? "" : "s")")
+                    if let b = model.busy[m.id] { Text(b).foregroundStyle(.orange).lineLimit(1) }
+                    else if m.status != .ready { Text(m.status.rawValue) }
+                }.font(.system(size: 12)).foregroundStyle(Theme.ink3)
+                if let b = model.busy[m.id], let pct = Double(b.split(separator: "(").last?.prefix(while: { $0.isNumber }) ?? "") {
+                    ProgressView(value: pct / 100).tint(Theme.indigo)
+                }
+            }
+            .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+            .background(selected ? Theme.rgb(0xE9E5DC) : .clear, in: RoundedRectangle(cornerRadius: 8))
+            .contentShape(Rectangle())
+        }.buttonStyle(.plain)
     }
 }
 
@@ -123,95 +446,229 @@ struct MeetingDetail: View {
     @EnvironmentObject var model: AppModel
     @ObservedObject var st: DetailState
     var meeting: Meeting { st.meeting }
+    let tabs = ["Summary", "Transcript", "Tasks", "My notes", "Speakers"]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                TextField("Title", text: $st.meeting.title, onCommit: { model.save(meeting) }).font(.title2).textFieldStyle(.plain)
-                Spacer()
-                if let b = model.busy[meeting.id] { ProgressView().controlSize(.small); Text(b).font(.caption) }
-                Menu {
-                    Button("Transcribe again") { model.process(meeting.id) }
-                    Button("Summarize again with \(model.config.provider.label)") { model.summarize(meeting.id) }
-                    Button("Export Markdown…") { model.export(meeting) }
-                    Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([Store.folder(meeting.id)]) }
-                    Divider()
-                    Button("Delete meeting", role: .destructive) { model.delete(meeting.id) }
-                } label: { Image(systemName: "ellipsis.circle") }.menuStyle(.borderlessButton).frame(width: 40)
-            }.padding()
-            Picker("", selection: $st.tab) { Text("Summary").tag(0); Text("Transcript").tag(1); Text("Action items").tag(2); Text("Speakers").tag(3) }
-                .pickerStyle(.segmented).padding(.horizontal)
-            Divider().padding(.top, 8)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top) {
+                    TextField("Title", text: $st.meeting.title, axis: .vertical)
+                        .lineLimit(1...3).onSubmit { model.save(meeting) }
+                        .textFieldStyle(.plain).font(Theme.serif(36))
+                    if let b = model.busy[meeting.id] { ProgressView().controlSize(.small); Text(b).font(.caption).foregroundStyle(Theme.ink3) }
+                    Button("Copy as Markdown") {
+                        NSPasteboard.general.clearContents(); NSPasteboard.general.setString(Markdown.export(meeting), forType: .string)
+                    }.buttonStyle(OutlineButton()).frame(height: 32)
+                    Menu {
+                        Button("Export Markdown…") { model.export(meeting) }
+                        Button("Transcribe again") { model.process(meeting.id) }
+                        Button("Summarize again with \(model.config.provider.label)") { model.summarize(meeting.id) }
+                        Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([Store.folder(meeting.id)]) }
+                        Divider()
+                        Button("Delete meeting", role: .destructive) { model.delete(meeting.id) }
+                    } label: { Image(systemName: "ellipsis.circle") }.menuStyle(.borderlessButton).frame(width: 36)
+                }
+                Text(meta).font(.system(size: 13)).foregroundStyle(Theme.ink3)
+                HStack(spacing: 8) {
+                    Text("Speakers").font(.system(size: 12)).foregroundStyle(Theme.ink3)
+                    ForEach(Array(meeting.speakers.enumerated()), id: \.offset) { i, spk in
+                        Button { st.tab = 4 } label: {
+                            Pill(text: "\(meeting.displayName(spk)) · \(meeting.segments.filter { $0.speaker == spk }.count) ✎",
+                                 fg: [Theme.rgb(0x2B2B8A), Theme.rgb(0x7A3E06), Theme.ok, Theme.ink2][i % 4],
+                                 bg: [Theme.rgb(0xE6E6FB), Theme.rgb(0xFCEBD9), Theme.okSoft, Theme.chip][i % 4])
+                        }.buttonStyle(.plain)
+                    }
+                }
+                HStack(spacing: 22) {
+                    ForEach(Array(tabs.enumerated()), id: \.offset) { i, t in
+                        Button { st.tab = i } label: {
+                            VStack(spacing: 8) {
+                                HStack(spacing: 6) {
+                                    Text(t).font(.system(size: 14, weight: st.tab == i ? .semibold : .medium)).foregroundStyle(st.tab == i ? Theme.ink : Theme.ink2)
+                                    if t == "Tasks", let n = meeting.summary?.actionItems.count, n > 0 { Pill(text: "\(n)") }
+                                }
+                                Rectangle().fill(st.tab == i ? Theme.indigo : .clear).frame(height: 2)
+                            }.fixedSize()
+                        }.buttonStyle(.plain)
+                    }
+                }.padding(.top, 6)
+            }
+            .padding(.horizontal, 32).padding(.top, 24)
+            Divider().overlay(Theme.line)
             ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 12) {
                     switch st.tab {
                     case 0: summaryTab
                     case 1: transcriptTab
                     case 2: actionsTab
+                    case 3: notesTab
                     default: speakersTab
                     }
-                }.padding().frame(maxWidth: .infinity, alignment: .leading)
+                }.padding(.horizontal, 32).padding(.vertical, 22).frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .onChange(of: model.meetings) { ms in if let fresh = ms.first(where: { $0.id == st.meeting.id }) { st.meeting = fresh } }
     }
 
+    var meta: String {
+        let f = DateFormatter(); f.dateFormat = "EEE d MMM · HH:mm"
+        let langs = Set(meeting.segments.compactMap(\.language)).sorted().map { $0 == "id" ? "Indonesian" : $0 == "en" ? "English" : $0 }
+        return "\(f.string(from: meeting.createdAt)) · \(formatTime(meeting.duration))" + (langs.isEmpty ? "" : " · " + langs.joined(separator: " + "))
+            + (meeting.summary.map { " · summary by \($0.provider)" } ?? "")
+    }
+
+    func heading(_ s: String) -> some View {
+        Text(s.uppercased()).font(.system(size: 12, weight: .bold)).kerning(0.5).foregroundStyle(Theme.ink2).padding(.top, 8)
+    }
+
     @ViewBuilder var summaryTab: some View {
         if let s = meeting.summary {
-            Text(s.summary).textSelection(.enabled)
-            if !s.decisions.isEmpty {
-                Text("Decisions").font(.headline).padding(.top, 6)
-                ForEach(s.decisions, id: \.self) { Text("• \($0)").textSelection(.enabled) }
-            }
-            if !s.openQuestions.isEmpty {
-                Text("Open questions").font(.headline).padding(.top, 6)
-                ForEach(s.openQuestions, id: \.self) { Text("• \($0)").textSelection(.enabled) }
-            }
-            Text("By \(s.provider)").font(.caption).foregroundStyle(.secondary).padding(.top, 6)
+            Text(s.summary).font(.system(size: 15)).lineSpacing(4).textSelection(.enabled)
+            if !s.decisions.isEmpty { heading("Decisions"); ForEach(s.decisions, id: \.self) { Text("• \($0)").font(.system(size: 14)).textSelection(.enabled) } }
+            if !s.openQuestions.isEmpty { heading("Open questions"); ForEach(s.openQuestions, id: \.self) { Text("• \($0)").font(.system(size: 14)).textSelection(.enabled) } }
         } else if meeting.segments.isEmpty {
-            Text(meeting.status == .failed ? "Processing failed: \(meeting.error ?? "")" : "Not transcribed yet.").foregroundStyle(.secondary)
-            Button("Transcribe now") { model.process(meeting.id) }
+            Text(meeting.status == .failed ? "Processing failed: \(meeting.error ?? "")" : "Not transcribed yet.").foregroundStyle(Theme.ink3)
+            Button("Transcribe now") { model.process(meeting.id) }.buttonStyle(OutlineButton()).frame(width: 160, height: 34)
         } else {
-            Button("Summarize with \(model.config.provider.label)") { model.summarize(meeting.id) }
+            Button("Summarize with \(model.config.provider.label)") { model.summarize(meeting.id) }.buttonStyle(OutlineButton()).frame(height: 34)
         }
     }
 
     @ViewBuilder var transcriptTab: some View {
         ForEach(Array(meeting.segments.enumerated()), id: \.offset) { _, s in
-            HStack(alignment: .top, spacing: 10) {
-                Text(formatTime(s.start)).font(.caption.monospacedDigit()).foregroundStyle(.secondary).frame(width: 48, alignment: .leading)
-                Text(meeting.displayName(s.speaker)).bold().frame(width: 90, alignment: .leading)
-                Text(s.text).textSelection(.enabled)
+            HStack(alignment: .top, spacing: 12) {
+                Text(formatTime(s.start)).font(.system(size: 12).monospacedDigit()).foregroundStyle(Theme.ink3).frame(width: 46, alignment: .leading)
+                Text(meeting.displayName(s.speaker)).font(.system(size: 13, weight: .semibold)).frame(width: 90, alignment: .leading)
+                Text(s.text).font(.system(size: 14)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             }
         }
     }
 
     @ViewBuilder var actionsTab: some View {
         let items = meeting.summary?.actionItems ?? []
-        if items.isEmpty { Text("No action items found.").foregroundStyle(.secondary) }
+        if items.isEmpty { Text("No tasks found.").foregroundStyle(Theme.ink3) }
         ForEach(Array(items.enumerated()), id: \.offset) { i, a in
-            Toggle(isOn: Binding(get: { a.done }, set: { v in st.meeting.summary?.actionItems[i].done = v; model.save(st.meeting) })) {
-                VStack(alignment: .leading) {
-                    Text(a.task)
-                    Text("\(a.owner ?? "Unassigned")\(a.due.map { " · due \($0)" } ?? "")").font(.caption).foregroundStyle(.secondary)
+            HStack(alignment: .top, spacing: 12) {
+                Toggle("", isOn: Binding(get: { a.done }, set: { v in st.meeting.summary?.actionItems[i].done = v; model.save(st.meeting) }))
+                    .toggleStyle(.checkbox).labelsHidden()
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(a.task).font(.system(size: 14)).strikethrough(a.done).fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 6) {
+                        Pill(text: a.owner ?? "Unassigned", fg: Theme.rgb(0x2B2B8A), bg: Theme.rgb(0xE6E6FB))
+                        if let d = a.due { Pill(text: d) }
+                    }
                 }
             }
+            .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.white, in: RoundedRectangle(cornerRadius: 10)).overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.line))
+            .opacity(a.done ? 0.6 : 1)
+        }
+        if !items.isEmpty {
+            Button("Copy tasks for WhatsApp") {
+                let text = items.filter { !$0.done }.map { "• \($0.task) — \($0.owner ?? "?")\($0.due.map { ", \($0)" } ?? "")" }.joined(separator: "\n")
+                NSPasteboard.general.clearContents(); NSPasteboard.general.setString("*\(meeting.title)*\n" + text, forType: .string)
+            }.buttonStyle(OutlineButton()).frame(width: 220, height: 34)
         }
     }
 
+    @ViewBuilder var notesTab: some View {
+        Text("Your own notes from this meeting. The summary uses them as hints.").font(.system(size: 12)).foregroundStyle(Theme.ink3)
+        TextEditor(text: Binding(get: { st.meeting.userNotes ?? "" }, set: { st.meeting.userNotes = $0 }))
+            .font(.system(size: 14)).scrollContentBackground(.hidden).frame(minHeight: 220).padding(8)
+            .background(Color.white, in: RoundedRectangle(cornerRadius: 10)).overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.line))
+        Button("Save notes") { model.save(st.meeting) }.buttonStyle(OutlineButton()).frame(width: 120, height: 32)
+    }
+
     @ViewBuilder var speakersTab: some View {
-        Text("Give speakers real names. Transcript, summary export and MCP use these names.").foregroundStyle(.secondary)
+        Text("Give speakers real names. The transcript, export and MCP use these names.").font(.system(size: 13)).foregroundStyle(Theme.ink3)
         ForEach(meeting.speakers, id: \.self) { spk in
             HStack {
                 Text(spk == "me" ? "Me" : spk.replacingOccurrences(of: "spk", with: "Speaker ")).frame(width: 90, alignment: .leading)
                 TextField("Name", text: Binding(get: { meeting.speakerNames[spk] ?? "" }, set: { st.meeting.speakerNames[spk] = $0 }),
                           onCommit: { model.save(meeting) })
-                Text("\(meeting.segments.filter { $0.speaker == spk }.count) turns").font(.caption).foregroundStyle(.secondary)
+                Text("\(meeting.segments.filter { $0.speaker == spk }.count) turns").font(.caption).foregroundStyle(Theme.ink3)
             }
         }
-        Button("Save names") { model.save(meeting) }
+        Button("Save names") { model.save(meeting) }.buttonStyle(OutlineButton()).frame(width: 120, height: 32)
     }
 }
+
+// MARK: first run
+
+struct SetupView: View {
+    @EnvironmentObject var model: AppModel
+    @Environment(\.dismissWindow) var dismissWindow
+    @ObservedObject var st = SetupState.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HushGlyph.onLight.frame(width: 48, height: 44)
+            (Text("Set up ").font(Theme.serif(40)) + Text("Hush").font(Theme.serif(40, italic: true)))
+            Text("Hush runs on this Mac only. Five quick checks, then you can record.").font(.system(size: 14)).foregroundStyle(Theme.ink2)
+            VStack(spacing: 10) {
+                step(st.engines, "Speech engine and models", st.enginesDetail, action: nil)
+                step(st.mic, "Microphone", "For your side of the call, or the whole room", action: st.mic ? nil : ("Allow", { MicCapture.requestAccess { _ in st.refresh() } }))
+                step(st.callAudioTried, "Call audio", "macOS asks the first time you record a call. Click Allow then.", action: nil, optional: true)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack { icon(model.config.provider != .none); Text("AI for notes and answers").font(.system(size: 14, weight: .semibold)); Spacer() }
+                    Picker("Use", selection: $model.config.provider) { ForEach(ProviderKind.allCases, id: \.self) { Text($0.label).tag($0) } }
+                        .labelsHidden().onChange(of: model.config.provider) { _ in model.saveConfig() }
+                }.padding(14).background(Color.white, in: RoundedRectangle(cornerRadius: 12)).overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+                step(model.config.lastHiddenCheck.hasPrefix("hidden"), "Prompter hidden from screen share",
+                     model.hiddenCheck ?? "One-click test on your Mac, about 3 seconds", action: ("Run check", { model.checkPrompterHidden() }))
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Tell people you are taking notes").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.rgb(0x6B4205))
+                Text("“\(AppModel.consentMessage)”").font(.system(size: 13)).foregroundStyle(Theme.rgb(0x4D3A1F)).fixedSize(horizontal: false, vertical: true)
+                Button("Copy message") { model.copyConsent() }.buttonStyle(.link).tint(Theme.indigo).font(.system(size: 13))
+            }.padding(14).background(Theme.rgb(0xFFF7EB), in: RoundedRectangle(cornerRadius: 12)).overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.rgb(0xF3DDB6)))
+            HStack {
+                Spacer()
+                Button { model.config.setupDone = true; model.saveConfig(); dismissWindow(id: "setup") } label: {
+                    Text("Start using Hush").padding(.horizontal, 20).frame(minHeight: 40)
+                }.buttonStyle(FilledButton(bg: Theme.ink))
+            }
+        }
+        .padding(32).frame(width: 560).background(Theme.panel)
+        .onAppear { st.refresh() }
+    }
+
+    func icon(_ done: Bool) -> some View {
+        Image(systemName: done ? "checkmark.circle.fill" : "circle").font(.system(size: 20)).foregroundStyle(done ? Theme.ok : Theme.ink3)
+    }
+
+    func step(_ done: Bool, _ title: String, _ detail: String, action: (String, () -> Void)?, optional: Bool = false) -> some View {
+        HStack(spacing: 12) {
+            icon(done)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.system(size: 14, weight: .semibold))
+                Text(detail).font(.system(size: 12)).foregroundStyle(Theme.ink3).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+            if let a = action { Button(a.0, action: a.1).buttonStyle(FilledButton(bg: Theme.indigo)).frame(height: 34) }
+        }
+        .padding(14).background(Color.white, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(done || optional ? Theme.line : Theme.indigo, lineWidth: done || optional ? 1 : 2))
+    }
+}
+
+final class SetupState: ObservableObject {
+    static let shared = SetupState()
+    @Published var engines = false
+    @Published var enginesDetail = ""
+    @Published var mic = false
+    @Published var callAudioTried = false
+    func refresh() {
+        let checks = Engines.check()
+        engines = checks.allSatisfy { $0.1 }
+        enginesDetail = engines ? "whisper.cpp + speaker models · checked" : "Missing: " + checks.filter { !$0.1 }.map(\.0).joined(separator: ", ") + ". Run: hush setup"
+        mic = AVCaptureDeviceAuthorized()
+        callAudioTried = Store.all().contains { $0.source == "live" }
+    }
+}
+
+func AVCaptureDeviceAuthorized() -> Bool { AVCaptureDevice.authorizationStatus(for: .audio) == .authorized }
+
 
 // MARK: settings
 
