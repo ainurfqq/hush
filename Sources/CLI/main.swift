@@ -143,6 +143,7 @@ case "config":
         case "claudePath": c.claudePath = v
         case "codexPath": c.codexPath = v
         case "claudeConfigDir": c.claudeConfigDir = v
+        case "codexHome": c.codexHome = v
         case "asrModel": c.asrModel = v
         case "language": c.language = v
         case "storageDir": c.storageDir = v.isEmpty ? nil : v

@@ -257,6 +257,10 @@ test("CLI providers run a real executable with the prompt on stdin (fake claude 
     }
     let c = try ClaudeCLIProvider(path: bin.appendingPathComponent("claude").path).complete(system: "S", user: "halo dari stdin", fast: false)
     expect(c.contains("-p --output-format text") && c.hasSuffix("halo dari stdin"), c)
+    let fakeEnv = bin.appendingPathComponent("codexenv")
+    try "#!/bin/sh\nprintf 'HOME=%s' \"$CODEX_HOME\"\n".write(to: fakeEnv, atomically: true, encoding: .utf8); chmod(fakeEnv.path, 0o755)
+    var cx = CodexCLIProvider(path: fakeEnv.path); cx.home = "/tmp/my-codex"
+    expect(try cx.complete(system: "", user: "", fast: true) == "HOME=/tmp/my-codex", "CODEX_HOME passed")
     let x = try CodexCLIProvider(path: bin.appendingPathComponent("codex").path).complete(system: "S", user: "pesan", fast: false)
     expect(x.contains("exec --skip-git-repo-check --sandbox read-only -") && x.hasSuffix("S\n\npesan"), x)
     expect((try? ClaudeCLIProvider(path: "/nonexistent/claude").complete(system: "", user: "", fast: true)) == nil, "missing binary throws")

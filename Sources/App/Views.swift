@@ -739,7 +739,12 @@ struct SettingsView: View {
                     TextField("claude command", text: $model.config.claudePath, prompt: Text("found automatically"))
                     TextField("Claude settings folder", text: $model.config.claudeConfigDir, prompt: Text("from your shell (CLAUDE_CONFIG_DIR)"))
                 }
-                if model.config.provider == .codexCLI { TextField("codex command", text: $model.config.codexPath, prompt: Text("found automatically")) }
+                if model.config.provider == .codexCLI {
+                    TextField("codex command", text: $model.config.codexPath, prompt: Text("found automatically"))
+                    TextField("Codex folder", text: $model.config.codexHome, prompt: Text("~/.codex (CODEX_HOME)"))
+                    Text("Uses your Codex login (run `codex login` once). Which ChatGPT plans include the Codex CLI: see OpenAI's Codex pricing page.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 if model.config.provider == .openAICompatible || model.config.provider == .anthropic {
                     SecureField("API key", text: $model.settingsKey, prompt: Text("stored in the macOS Keychain"))
                     Button("Save key") { Keychain.set(model.config.provider == .anthropic ? "anthropic" : "openai", apiKey); model.settingsKey = ""; model.settingsTest = "Key saved to Keychain." }

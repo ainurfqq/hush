@@ -26,7 +26,10 @@ public enum AI {
             var p = ClaudeCLIProvider(path: c.claudePath, model: c.model, fastModel: c.prompterModel)
             p.configDir = c.claudeConfigDir.isEmpty ? (Shell.loginShellVar("CLAUDE_CONFIG_DIR") ?? "") : (c.claudeConfigDir as NSString).expandingTildeInPath
             return p
-        case .codexCLI: return CodexCLIProvider(path: c.codexPath, model: c.model)
+        case .codexCLI:
+            var p = CodexCLIProvider(path: c.codexPath, model: c.model)
+            p.home = c.codexHome.isEmpty ? (Shell.loginShellVar("CODEX_HOME") ?? "") : (c.codexHome as NSString).expandingTildeInPath
+            return p
         case .openAICompatible:
             return OpenAICompatibleProvider(baseURL: c.openAIBaseURL, model: c.model.isEmpty ? "llama3.2" : c.model,
                                             fastModel: c.prompterModel, apiKey: Keychain.get("openai"))
@@ -73,6 +76,8 @@ public struct ClaudeCLIProvider: AIProvider {
 
 public struct CodexCLIProvider: AIProvider {
     public var path: String, model: String
+    /// CODEX_HOME for the child process (where `codex login` keeps its login); empty = ~/.codex.
+    public var home: String = ""
     public var name: String { "codex-cli" }
     public init(path: String = "", model: String = "") { self.path = path; self.model = model }
 
@@ -86,8 +91,12 @@ public struct CodexCLIProvider: AIProvider {
     public func complete(system: String, user: String, fast: Bool) throws -> String {
         guard let exe = Shell.which("codex", override: path) else { throw HushError.missing("codex CLI (npm i -g @openai/codex, or set its path in Settings)") }
         let r = try Shell.run(exe, arguments(), stdin: "\(system)\n\n\(user)", timeout: fast ? 90 : 300,
+                              env: home.isEmpty ? nil : ["CODEX_HOME": home],
                               cwd: FileManager.default.temporaryDirectory.path)
-        guard r.status == 0 else { throw HushError.provider("codex exit \(r.status): \(r.stderr.suffix(300))") }
+        guard r.status == 0 else {
+            let msg = [r.stderr, r.stdout].map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.first { !$0.isEmpty } ?? "no message"
+            throw HushError.provider("codex exit \(r.status): \(msg.suffix(300)). If it says you are not logged in, run: codex login")
+        }
         return r.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
