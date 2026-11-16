@@ -8,7 +8,7 @@ class Hush < Formula
 
   depends_on arch: :arm64
   depends_on macos: :sonoma
-  depends_on "whisper-cpp"
+  depends_on "whisper.cpp"
 
   def install
     system "bash", "scripts/build.sh"
