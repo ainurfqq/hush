@@ -37,17 +37,25 @@ enum PrompterCheck {
                 }
                 func onMain(_ b: @escaping () -> Void) async { await MainActor.run { b() }; try? await Task.sleep(nanoseconds: 350_000_000) }
 
+                // B1 hidden · A shown (real setting) · C shown and made capturable (control) · B2 hidden again.
                 await onMain { panel.orderOut(nil) }
-                let b1 = try await grab(), b2 = try await grab()
+                let b1 = try await grab()
                 await onMain { panel.orderFrontRegardless() }
                 let a = try await grab()
                 await onMain { panel.sharingType = .readOnly }
                 let c = try await grab()
-                await onMain { panel.sharingType = original }
+                await onMain { panel.sharingType = original; panel.orderOut(nil) }
+                let b2 = try await grab()
+                await onMain { panel.orderFrontRegardless() }
 
-                let noise = diff(b1, b2), shown = diff(a, b1), control = diff(c, b1)
+                // The screen behind can change (a ticking clock, scrolling text), so do not compare A with a
+                // single background frame. Ask instead: does A look like the background, or like the panel (C)?
+                let noise = diff(b1, b2)
+                let shown = min(diff(a, b1), diff(a, b2))
+                let toPanel = diff(a, c)
+                let control = min(diff(c, b1), diff(c, b2))
                 let valid = control > noise + 4
-                let hidden = shown <= noise + 2
+                let hidden = shown * 2 < toPanel
                 await MainActor.run { completion(Result(hidden: hidden, valid: valid, noise: noise, shown: shown, control: control), nil) }
             } catch {
                 await MainActor.run { panel.sharingType = original; completion(nil, "\(error). Allow Hush under System Settings → Privacy & Security → Screen & System Audio Recording to run this check.") }
