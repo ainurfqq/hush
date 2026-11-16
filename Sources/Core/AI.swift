@@ -1,0 +1,189 @@
+import Foundation
+import Security
+
+/// Anything that turns a prompt into text. Implementations never log prompts or keys.
+public protocol AIProvider {
+    var name: String { get }
+    func complete(system: String, user: String, fast: Bool) throws -> String
+}
+
+public enum AI {
+    /// Builds the provider the user picked. Returns nil for `.none`.
+    public static func provider(_ c: Config = .load(), forPrompter: Bool = false) -> AIProvider? {
+        let kind = forPrompter ? (c.prompterProvider ?? c.provider) : c.provider
+        // When the prompter uses its own provider, `prompterModel` is that provider's model.
+        let split = forPrompter && c.prompterProvider != nil && c.prompterProvider != c.provider
+        var c = c
+        if split { c.model = c.prompterModel; c.prompterModel = "" }
+        switch kind {
+        case .none: return nil
+        case .claudeCLI: return ClaudeCLIProvider(path: c.claudePath, model: c.model, fastModel: c.prompterModel)
+        case .codexCLI: return CodexCLIProvider(path: c.codexPath, model: c.model)
+        case .openAICompatible:
+            return OpenAICompatibleProvider(baseURL: c.openAIBaseURL, model: c.model.isEmpty ? "llama3.2" : c.model,
+                                            fastModel: c.prompterModel, apiKey: Keychain.get("openai"))
+        case .anthropic:
+            return AnthropicProvider(apiKey: Keychain.get("anthropic") ?? "", model: c.model, fastModel: c.prompterModel)
+        }
+    }
+}
+
+// MARK: - Claude Code CLI
+
+public struct ClaudeCLIProvider: AIProvider {
+    public var path: String, model: String, fastModel: String
+    public var name: String { "claude-cli" }
+    public init(path: String = "", model: String = "", fastModel: String = "") { self.path = path; self.model = model; self.fastModel = fastModel }
+
+    /// Arguments for a one-shot, tool-less, non-persistent call. Prompt goes on stdin.
+    public func arguments(system: String, fast: Bool) -> [String] {
+        var a = ["-p", "--output-format", "text", "--no-session-persistence", "--tools", "", "--system-prompt", system]
+        let m = fast && !fastModel.isEmpty ? fastModel : (fast && model.isEmpty ? "haiku" : model)
+        if !m.isEmpty { a += ["--model", m] }
+        return a
+    }
+
+    public func complete(system: String, user: String, fast: Bool) throws -> String {
+        guard let exe = Shell.which("claude", override: path) else { throw HushError.missing("claude CLI (install Claude Code, or set its path in Settings)") }
+        // Run from a neutral folder so project CLAUDE.md files are not pulled into the prompt.
+        let r = try Shell.run(exe, arguments(system: system, fast: fast), stdin: user, timeout: fast ? 60 : 300,
+                              cwd: FileManager.default.temporaryDirectory.path)
+        guard r.status == 0 else { throw HushError.provider("claude exit \(r.status): \(r.stderr.suffix(300))") }
+        return r.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+// MARK: - Codex CLI
+
+public struct CodexCLIProvider: AIProvider {
+    public var path: String, model: String
+    public var name: String { "codex-cli" }
+    public init(path: String = "", model: String = "") { self.path = path; self.model = model }
+
+    public func arguments() -> [String] {
+        var a = ["exec", "--skip-git-repo-check", "--sandbox", "read-only"]
+        if !model.isEmpty { a += ["--model", model] }
+        a.append("-")   // read prompt from stdin
+        return a
+    }
+
+    public func complete(system: String, user: String, fast: Bool) throws -> String {
+        guard let exe = Shell.which("codex", override: path) else { throw HushError.missing("codex CLI (npm i -g @openai/codex, or set its path in Settings)") }
+        let r = try Shell.run(exe, arguments(), stdin: "\(system)\n\n\(user)", timeout: fast ? 90 : 300,
+                              cwd: FileManager.default.temporaryDirectory.path)
+        guard r.status == 0 else { throw HushError.provider("codex exit \(r.status): \(r.stderr.suffix(300))") }
+        return r.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+// MARK: - OpenAI-compatible (OpenAI, OpenRouter, Ollama, LM Studio, vLLM…)
+
+public struct OpenAICompatibleProvider: AIProvider {
+    public var baseURL: String, model: String, fastModel: String, apiKey: String?
+    public var name: String { "openai-compatible:\(model)" }
+    public init(baseURL: String, model: String, fastModel: String = "", apiKey: String? = nil) {
+        self.baseURL = baseURL; self.model = model; self.fastModel = fastModel; self.apiKey = apiKey
+    }
+
+    public func request(system: String, user: String, fast: Bool) throws -> URLRequest {
+        let base = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
+        guard let url = URL(string: base + "/chat/completions") else { throw HushError.provider("bad base URL \(baseURL)") }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"; req.timeoutInterval = fast ? 60 : 300
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let k = apiKey, !k.isEmpty { req.setValue("Bearer \(k)", forHTTPHeaderField: "Authorization") }
+        let body: [String: Any] = [
+            "model": fast && !fastModel.isEmpty ? fastModel : model,
+            "messages": [["role": "system", "content": system], ["role": "user", "content": user]],
+            "stream": false,
+        ]
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        return req
+    }
+
+    public func complete(system: String, user: String, fast: Bool) throws -> String {
+        let (data, status) = try HTTP.send(try request(system: system, user: user, fast: fast))
+        guard status == 200 else { throw HushError.provider("HTTP \(status): \(String(decoding: data.prefix(300), as: UTF8.self))") }
+        guard let j = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let choices = j["choices"] as? [[String: Any]], let msg = choices.first?["message"] as? [String: Any],
+              let text = msg["content"] as? String else { throw HushError.provider("unexpected response shape") }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+// MARK: - Anthropic Messages API (raw HTTP; Swift has no official SDK)
+
+public struct AnthropicProvider: AIProvider {
+    public var apiKey: String, model: String, fastModel: String
+    public var endpoint = "https://api.anthropic.com/v1/messages"
+    public var name: String { "anthropic:\(resolvedModel(fast: false))" }
+    public init(apiKey: String, model: String = "", fastModel: String = "") { self.apiKey = apiKey; self.model = model; self.fastModel = fastModel }
+
+    public func resolvedModel(fast: Bool) -> String {
+        if fast && !fastModel.isEmpty { return fastModel }
+        return model.isEmpty ? "claude-opus-5-5" : model
+    }
+
+    public func request(system: String, user: String, fast: Bool) throws -> URLRequest {
+        var req = URLRequest(url: URL(string: endpoint)!)
+        req.httpMethod = "POST"; req.timeoutInterval = fast ? 60 : 300
+        req.setValue("application/json", forHTTPHeaderField: "content-type")
+        req.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        req.setValue("2026-10-21", forHTTPHeaderField: "anthropic-version")
+        let model = resolvedModel(fast: fast)
+        // Server-side refusal fallback exists only for these families (Haiku has none).
+        let fallbackOK = ["claude-opus-5", "claude-fable-5", "claude-sonnet-5-5"].contains { model.hasPrefix($0) }
+        if fallbackOK { req.setValue("server-side-fallback-2026-07-01", forHTTPHeaderField: "anthropic-beta") }
+        var body: [String: Any] = [
+            "model": model,
+            "max_tokens": fast ? 1024 : 16000,
+            "system": system,
+            "messages": [["role": "user", "content": user]],
+            // Short answers want speed; summaries are a single extraction pass.
+            "output_config": ["effort": fast ? "low" : "medium"],
+        ]
+        if fallbackOK { body["fallbacks"] = "default" }
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        return req
+    }
+
+    public static func parse(_ data: Data) throws -> String {
+        guard let j = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw HushError.provider("bad JSON") }
+        if let err = j["error"] as? [String: Any] { throw HushError.provider("\(err["type"] ?? ""): \(err["message"] ?? "")") }
+        if (j["stop_reason"] as? String) == "refusal" { throw HushError.provider("the model declined this request") }
+        let blocks = (j["content"] as? [[String: Any]]) ?? []
+        return blocks.filter { ($0["type"] as? String) == "text" }.compactMap { $0["text"] as? String }
+            .joined().trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    public func complete(system: String, user: String, fast: Bool) throws -> String {
+        guard !apiKey.isEmpty else { throw HushError.missing("Anthropic API key (Settings → AI)") }
+        let (data, status) = try HTTP.send(try request(system: system, user: user, fast: fast))
+        guard status == 200 else { throw HushError.provider("HTTP \(status): \(String(decoding: data.prefix(300), as: UTF8.self))") }
+        return try Self.parse(data)
+    }
+}
+
+// MARK: - Keychain
+
+public enum Keychain {
+    static let service = "id.roxst.hush"
+
+    public static func set(_ account: String, _ value: String) {
+        let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
+        SecItemDelete(q as CFDictionary)
+        guard !value.isEmpty else { return }
+        var add = q; add[kSecValueData as String] = Data(value.utf8)
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        SecItemAdd(add as CFDictionary, nil)
+    }
+
+    public static func get(_ account: String) -> String? {
+        if let env = ProcessInfo.processInfo.environment["HUSH_\(account.uppercased())_KEY"], !env.isEmpty { return env }
+        let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
+                                kSecAttrAccount as String: account, kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne]
+        var out: AnyObject?
+        guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let d = out as? Data else { return nil }
+        return String(data: d, encoding: .utf8)
+    }
+}

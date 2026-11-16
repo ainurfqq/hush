@@ -1,0 +1,9 @@
+.cache/
+build/
+qa/
+spikes/
+*.wav
+*.mov
+*.aiff
+.DS_Store
+.swiftpm/
