@@ -103,8 +103,12 @@ struct MenuContent: View {
         } else if let h = model.hiddenCheck {
             Text(h).font(.system(size: 11)).foregroundStyle(h.hasPrefix("Hidden") ? Theme.ok : Theme.rec).lineLimit(3)
         } else if parts.count == 2 {
-            Text(parts[0] == "hidden" ? "Hidden from screen capture · checked \(parts[1])" : "Visible in screen capture! · \(parts[1])")
-                .font(.system(size: 12)).foregroundStyle(parts[0] == "hidden" ? Theme.ok : Theme.rec)
+            HStack(spacing: 6) {
+                Text(parts[0] == "hidden" ? "Hidden from screen capture · checked \(parts[1])" : "Last check (\(parts[1])): visible in screen capture")
+                    .font(.system(size: 12)).foregroundStyle(parts[0] == "hidden" ? Theme.ok : Theme.rec)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Check again") { model.checkPrompterHidden() }.buttonStyle(LinkStyle()).font(.system(size: 12))
+            }
         } else {
             Button("Check it is hidden from screen share") { model.checkPrompterHidden() }.buttonStyle(LinkStyle()).font(.system(size: 12)).tint(Theme.indigo)
         }

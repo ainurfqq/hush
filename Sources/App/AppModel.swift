@@ -235,7 +235,8 @@ final class AppModel: ObservableObject {
                     self.hiddenCheck = r?.summary ?? err
                     self.needsScreenPermission = false
                 }
-                if let r, r.valid {
+                // QA runs (deliberately capturable panel) must never overwrite the user's saved result.
+                if let r, r.valid, ProcessInfo.processInfo.environment["HUSH_QA_CAPTURABLE"] != "1" {
                     let f = DateFormatter(); f.dateFormat = "d MMM yyyy"
                     self.config.lastHiddenCheck = (r.hidden ? "hidden" : "visible") + "|" + f.string(from: Date())
                     self.saveConfig()
