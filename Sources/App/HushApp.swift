@@ -21,6 +21,9 @@ struct HushApp: App {
             .windowResizability(.contentSize)
         Window("Hush Settings", id: "settings") { SettingsView().environmentObject(AppDelegate.model) }
             .windowResizability(.contentSize)
+        // QA only (opened with --open menupreview): the menu-bar popover in a normal window for screenshots.
+        Window("Hush Menu Preview", id: "menupreview") { MenuContent().environmentObject(AppDelegate.model) }
+            .windowResizability(.contentSize)
     }
 }
 
@@ -43,6 +46,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ n: Notification) {
         Theme.registerFonts()
+        // The warm design is light-only; without this, macOS dark mode turns system text white on our light panels.
+        NSApp.appearance = NSAppearance(named: .aqua)
         NSApp.setActivationPolicy(.accessory)
         let m = Self.model
         let mods = controlKey | optionKey
@@ -86,6 +91,9 @@ enum TestHooks {
         if let i = argv.firstIndex(of: "--open"), i + 1 < argv.count {
             let id = argv[i + 1]
             if let j = argv.firstIndex(of: "--select"), j + 1 < argv.count { m.libSelection = argv[j + 1] }
+            if let j = argv.firstIndex(of: "--tab"), j + 1 < argv.count, let t = Int(argv[j + 1]), let id = m.libSelection,
+               let mt = m.meetings.first(where: { $0.id == id }) { m.detailState(mt).tab = t }
+            if argv.contains("--recording-look") { m.isRecording = true; m.elapsed = 768; m.micLevel = 0.04; m.sysLevel = 0.09 }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { m.openWindowAction?(id) }
         }
         if argv.contains("--verify-hidden") {

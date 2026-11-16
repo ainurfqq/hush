@@ -7,6 +7,8 @@ import AVFoundation
 struct MenuContent: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.openWindow) var openWindow
+    @ObservedObject var flash = MenuRowFlash.shared
+    var copied: Bool { flash.on }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -18,21 +20,24 @@ struct MenuContent: View {
                 }
             }
             Divider()
-            HStack {
-                Button("Open notes") { open("library") }.buttonStyle(LinkStyle())
-                Spacer()
-                Button("Copy consent message") { model.copyConsent() }.buttonStyle(LinkStyle())
-                Spacer()
-                Button("Settings") { open("settings") }.buttonStyle(LinkStyle())
-            }.font(.system(size: 12, weight: .medium)).tint(Theme.indigo)
-            HStack {
-                Spacer()
-                Button("Quit Hush") { NSApp.terminate(nil) }.buttonStyle(LinkStyle(color: Theme.ink3)).font(.caption)
+            VStack(spacing: 0) {
+                MenuRow(icon: "doc.text", title: "Open notes", shortcut: "⌘O") { open("library") }
+                    .keyboardShortcut("o", modifiers: .command)
+                MenuRow(icon: "doc.on.clipboard", title: copied ? "Consent message copied" : "Copy consent message", shortcut: nil) {
+                    model.copyConsent(); MenuRowFlash.shared.flash()
+                }
+                MenuRow(icon: "gearshape", title: "Settings…", shortcut: "⌘,") { open("settings") }
+                    .keyboardShortcut(",", modifiers: .command)
+                Divider().padding(.vertical, 4)
+                MenuRow(icon: "power", title: "Quit Hush", shortcut: "⌘Q") { NSApp.terminate(nil) }
+                    .keyboardShortcut("q", modifiers: .command)
             }
+            .padding(.horizontal, -8)
         }
         .padding(16)
         .frame(width: 340)
         .background(Theme.panel)
+        .tint(Theme.indigo)
         .onAppear { model.openWindowAction = { id in openWindow(id: id); NSApp.activate(ignoringOtherApps: true) } }
     }
 
@@ -49,11 +54,12 @@ struct MenuContent: View {
             Spacer()
             Pill(text: "On this Mac", fg: Theme.ok, bg: Theme.okSoft)
         }
-        Picker("Recording mode", selection: $model.recordingMode) {
-            Text("Online call").tag(Recorder.Mode.call)
-            Text("In the room").tag(Recorder.Mode.room)
+        HStack(spacing: 4) {
+            SegmentButton(title: "Online call", on: model.recordingMode == .call) { model.recordingMode = .call }
+            SegmentButton(title: "In the room", on: model.recordingMode == .room) { model.recordingMode = .room }
         }
-        .pickerStyle(.segmented).labelsHidden()
+        .padding(3).background(Theme.chip, in: RoundedRectangle(cornerRadius: 9))
+        .accessibilityElement(children: .contain).accessibilityLabel("Recording mode")
         Text(model.recordingMode == .call ? "Hears your mic as \"Me\" and the call as everyone else. No bot joins."
                                           : "Uses the mic only and tells the voices in the room apart.")
             .font(.system(size: 12)).foregroundStyle(Theme.ink3).fixedSize(horizontal: false, vertical: true)
@@ -85,9 +91,10 @@ struct MenuContent: View {
                         HStack {
                             Text(m.title).font(Theme.serif(17)).lineLimit(1)
                             Spacer()
-                            Text("\(formatTime(m.duration)) · \(m.summary?.actionItems.count ?? 0) tasks").font(.system(size: 12)).foregroundStyle(Theme.ink3)
-                        }.padding(.horizontal, 6).padding(.vertical, 5).contentShape(Rectangle())
-                    }.buttonStyle(RowStyle())
+                            let n = m.summary?.actionItems.count ?? 0
+                            Text(formatTime(m.duration) + (n > 0 ? " · \(n) task\(n == 1 ? "" : "s")" : "")).font(.system(size: 12)).foregroundStyle(Theme.ink3)
+                        }.padding(.horizontal, 8).padding(.vertical, 5).contentShape(Rectangle())
+                    }.buttonStyle(RowStyle(radius: 6)).padding(.horizontal, -8)
                 }
             }
         }
@@ -110,7 +117,7 @@ struct MenuContent: View {
                 Button("Check again") { model.checkPrompterHidden() }.buttonStyle(LinkStyle()).font(.system(size: 12))
             }
         } else {
-            Button("Check it is hidden from screen share") { model.checkPrompterHidden() }.buttonStyle(LinkStyle()).font(.system(size: 12)).tint(Theme.indigo)
+            Button("Run screen-share check") { model.checkPrompterHidden() }.buttonStyle(LinkStyle()).font(.system(size: 12))
         }
     }
 
@@ -147,6 +154,48 @@ struct MenuContent: View {
         }.buttonStyle(FilledButton(bg: Theme.ink))
         Text("Notes in a few minutes, on this Mac").font(.system(size: 12)).foregroundStyle(Theme.ink3).frame(maxWidth: .infinity)
     }
+}
+
+struct SegmentButton: View {
+    let title: String; let on: Bool; let action: () -> Void
+    @StateObject var h = HoverBox()
+    var body: some View {
+        Button(action: action) {
+            Text(title).font(.system(size: 13, weight: on ? .semibold : .medium)).foregroundStyle(on ? Theme.ink : Theme.ink2)
+                .frame(maxWidth: .infinity, minHeight: 30)
+                .background(RoundedRectangle(cornerRadius: 7).fill(on ? Color.white : (h.on ? Color.white.opacity(0.5) : .clear))
+                    .shadow(color: .black.opacity(on ? 0.08 : 0), radius: 1, y: 1))
+        }
+        .buttonStyle(.plain).tracksHover(h).accessibilityAddTraits(on ? .isSelected : [])
+    }
+}
+
+/// Native-feeling menu row: icon, label, right-aligned shortcut, soft hover background.
+struct MenuRow: View {
+    let icon: String
+    let title: String
+    let shortcut: String?
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: icon).font(.system(size: 13)).foregroundStyle(Theme.ink2).frame(width: 18)
+                Text(title).font(.system(size: 13)).foregroundStyle(Theme.ink)
+                Spacer()
+                if let s = shortcut { Text(s).font(.system(size: 12)).foregroundStyle(Theme.ink3) }
+            }
+            .padding(.horizontal, 8).padding(.vertical, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(RowStyle(radius: 6))
+    }
+}
+
+/// Brief "copied" confirmation on the consent row.
+final class MenuRowFlash: ObservableObject {
+    static let shared = MenuRowFlash()
+    @Published var on = false
+    func flash() { on = true; DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { self.on = false } }
 }
 
 func ago(_ d: Date) -> String {
@@ -211,6 +260,7 @@ struct LiveWindow: View {
             bottomBar
         }
         .background(Theme.panel)
+        .tint(Theme.indigo)
         .frame(minWidth: 560, minHeight: 640)
     }
 
@@ -243,8 +293,9 @@ struct LiveWindow: View {
                                 .foregroundStyle(l.who == "me" ? Theme.ink : Theme.rgb(0x7A3E06)).frame(width: 52, alignment: .leading)
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(l.text).font(.system(size: 15)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                                if l.question != nil {
-                                    Text(model.config.prompterAutoAnswer ? "Question · answer is on the prompter" : "Question · press ⌃⌥A for an answer")
+                                if let q = l.question {
+                                    Text(q == model.prompterQuestion ? "Question · answer is on the prompter"
+                                         : (model.config.prompterAutoAnswer ? "Question · pick it on the prompter for an answer" : "Question · press ⌃⌥A for an answer"))
                                         .font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.indigo)
                                 }
                             }
@@ -355,6 +406,7 @@ struct LibraryView: View {
             .padding([.top, .bottom, .trailing], 12)
         }
         .background(Theme.paper)
+        .tint(Theme.indigo)
         .frame(minWidth: 960, minHeight: 600)
         .onAppear { model.reload() }
     }
@@ -372,13 +424,17 @@ struct LibraryView: View {
             TextField("Search words, people, tasks", text: $model.libQuery)
                 .textFieldStyle(.plain).font(.system(size: 13)).padding(.horizontal, 10).frame(minHeight: 34)
                 .background(Color.white, in: RoundedRectangle(cornerRadius: 8)).overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.line))
-            ScrollView {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(groups, id: \.0) { g in
-                        Text(g.0.uppercased()).font(.system(size: 11, weight: .semibold)).kerning(0.6).foregroundStyle(Theme.ink3).padding(.top, 8).padding(.horizontal, 8)
-                        ForEach(g.1, id: \.id) { m in row(m) }
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(groups, id: \.0) { g in
+                            Text(g.0.uppercased()).font(.system(size: 11, weight: .semibold)).kerning(0.6).foregroundStyle(Theme.ink3).padding(.top, 8).padding(.horizontal, 8)
+                            ForEach(g.1, id: \.id) { m in row(m).id(m.id) }
+                        }
                     }
                 }
+                .onAppear { if let s = model.libSelection { proxy.scrollTo(s, anchor: .center) } }
+                .onChange(of: model.libSelection) { s in if let s { withAnimation { proxy.scrollTo(s, anchor: .center) } } }
             }
             Spacer(minLength: 0)
             HStack {
@@ -441,7 +497,8 @@ struct MeetingDetail: View {
                 HStack(alignment: .top) {
                     TextField("Title", text: $st.meeting.title, axis: .vertical)
                         .lineLimit(1...3).onSubmit { model.save(meeting) }
-                        .textFieldStyle(.plain).font(Theme.serif(36))
+                        .textFieldStyle(.plain).font(Theme.serif(32))
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     if let b = model.busy[meeting.id] { ProgressView().controlSize(.small); Text(b).font(.caption).foregroundStyle(Theme.ink3) }
                     Button("Copy as Markdown") {
                         NSPasteboard.general.clearContents(); NSPasteboard.general.setString(Markdown.export(meeting), forType: .string)
@@ -614,7 +671,7 @@ struct SetupView: View {
                 }.buttonStyle(FilledButton(bg: Theme.ink))
             }
         }
-        .padding(32).frame(width: 560).background(Theme.panel)
+        .padding(32).frame(width: 560).background(Theme.panel).tint(Theme.indigo)
         .onAppear { st.refresh() }
     }
 
@@ -667,22 +724,22 @@ struct SettingsView: View {
                 Picker("Provider", selection: $model.config.provider) {
                     ForEach(ProviderKind.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
-                TextField("Model (empty = default)", text: $model.config.model)
-                TextField("Faster model for the prompter (optional)", text: $model.config.prompterModel)
+                TextField("Model", text: $model.config.model, prompt: Text("default"))
+                TextField("Faster model for the prompter", text: $model.config.prompterModel, prompt: Text("optional, e.g. haiku"))
                 if model.config.provider == .openAICompatible {
-                    TextField("Base URL", text: $model.config.openAIBaseURL)
+                    TextField("Base URL", text: $model.config.openAIBaseURL, prompt: Text("http://127.0.0.1:11434/v1"))
                 }
                 if model.config.provider == .claudeCLI {
-                    TextField("claude path (empty = auto)", text: $model.config.claudePath)
-                    TextField("Claude settings folder, CLAUDE_CONFIG_DIR (empty = from your shell)", text: $model.config.claudeConfigDir)
+                    TextField("claude command", text: $model.config.claudePath, prompt: Text("found automatically"))
+                    TextField("Claude settings folder", text: $model.config.claudeConfigDir, prompt: Text("from your shell (CLAUDE_CONFIG_DIR)"))
                 }
-                if model.config.provider == .codexCLI { TextField("codex path (empty = auto)", text: $model.config.codexPath) }
+                if model.config.provider == .codexCLI { TextField("codex command", text: $model.config.codexPath, prompt: Text("found automatically")) }
                 if model.config.provider == .openAICompatible || model.config.provider == .anthropic {
-                    SecureField("API key (stored in Keychain)", text: $model.settingsKey)
+                    SecureField("API key", text: $model.settingsKey, prompt: Text("stored in the macOS Keychain"))
                     Button("Save key") { Keychain.set(model.config.provider == .anthropic ? "anthropic" : "openai", apiKey); model.settingsKey = ""; model.settingsTest = "Key saved to Keychain." }
                 }
                 HStack {
-                    Button("Test") { test() }
+                    Button("Test") { test() }.buttonStyle(OutlineButton())
                     Text(model.settingsTest).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
                 Text("Only transcript text you summarize or ask about is sent to this provider. Audio never leaves your Mac.")
@@ -696,9 +753,9 @@ struct SettingsView: View {
                 Text("Tip: a local Ollama model answers in about 2 s; Claude Code CLI in about 5-7 s but writes better answers.").font(.caption).foregroundStyle(.secondary)
                 Toggle("Answer questions from others automatically", isOn: $model.config.prompterAutoAnswer)
                 Slider(value: Binding(get: { model.config.prompterOpacity }, set: { model.setOpacity($0) }), in: 0.3...1) { Text("Opacity") }
-                TextField("Your name", text: $model.config.userName)
+                TextField("Your name", text: $model.config.userName, prompt: Text("used in the prompter"))
                 HStack {
-                    TextField("Context notes file (CV, product facts…)", text: $model.config.contextFile)
+                    TextField("Context notes file", text: $model.config.contextFile, prompt: Text("CV, product facts… (.txt)"))
                     Button("Choose…") {
                         let p = NSOpenPanel(); p.allowedContentTypes = [.plainText, .text]
                         if p.runModal() == .OK, let u = p.url { model.config.contextFile = u.path }
@@ -726,9 +783,13 @@ struct SettingsView: View {
                 Text("You are responsible for telling people they are being recorded and for following the rules of each meeting, interview or exam.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            HStack { Spacer(); Button("Save") { model.saveConfig() }.keyboardShortcut(.defaultAction) }
+            HStack { Spacer(); Button("Save") { model.saveConfig() }.buttonStyle(FilledButton(bg: Theme.indigo)).keyboardShortcut(.defaultAction) }
         }
         .formStyle(.grouped)
+        .textFieldStyle(.roundedBorder)
+        .scrollContentBackground(.hidden)
+        .background(Theme.paper)
+        .tint(Theme.indigo)
         .frame(width: 560, height: 680)
         .onDisappear { model.saveConfig() }
     }
