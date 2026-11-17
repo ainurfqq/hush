@@ -32,6 +32,43 @@ extension View {
 
 // MARK: buttons
 
+/// Save button that answers the click: turns green with a check and "Saved" for 1.6 s, then goes back.
+final class FlashBox: ObservableObject { @Published var done = false; var work: DispatchWorkItem? }
+
+struct SaveButton: View {
+    var title = "Save"
+    var outline = false
+    var action: () -> Void
+    @StateObject private var f = FlashBox()
+
+    private var button: some View {
+        Button {
+            action()
+            f.work?.cancel()
+            withAnimation(.easeOut(duration: 0.15)) { f.done = true }
+            let w = DispatchWorkItem { withAnimation(.easeOut(duration: 0.25)) { f.done = false } }
+            f.work = w
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.6, execute: w)
+        } label: {
+            HStack(spacing: 6) {
+                if f.done {
+                    Image(systemName: "checkmark").font(.system(size: 12, weight: .bold))
+                        .transition(reduceMotion ? .opacity : .scale(scale: 0.4).combined(with: .opacity))
+                }
+                Text(f.done ? "Saved" : title)
+            }
+            .frame(minWidth: 72)
+        }
+        .accessibilityLabel(f.done ? "Saved" : title)
+    }
+
+    var body: some View {
+        if f.done { button.buttonStyle(FilledButton(bg: Theme.ok)) }
+        else if outline { button.buttonStyle(OutlineButton()) }
+        else { button.buttonStyle(FilledButton(bg: Theme.indigo)) }
+    }
+}
+
 struct FilledButton: ButtonStyle {
     var bg: Color
     func makeBody(configuration: Configuration) -> some View { FilledBody(c: configuration, bg: bg) }

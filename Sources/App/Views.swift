@@ -617,7 +617,7 @@ struct MeetingDetail: View {
         TextEditor(text: Binding(get: { st.meeting.userNotes ?? "" }, set: { st.meeting.userNotes = $0 }))
             .font(.system(size: 14)).scrollContentBackground(.hidden).frame(minHeight: 220).padding(8)
             .background(Color.white, in: RoundedRectangle(cornerRadius: 10)).overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.line))
-        Button("Save notes") { model.save(st.meeting) }.buttonStyle(OutlineButton()).frame(width: 120, height: 32)
+        SaveButton(title: "Save notes", outline: true) { model.save(st.meeting) }.frame(width: 120, height: 32)
     }
 
     @ViewBuilder var speakersTab: some View {
@@ -630,7 +630,7 @@ struct MeetingDetail: View {
                 Text("\(meeting.segments.filter { $0.speaker == spk }.count) turns").font(.caption).foregroundStyle(Theme.ink3)
             }
         }
-        Button("Save names") { model.save(meeting) }.buttonStyle(OutlineButton()).frame(width: 120, height: 32)
+        SaveButton(title: "Save names", outline: true) { model.save(meeting) }.frame(width: 120, height: 32)
     }
 }
 
@@ -766,7 +766,7 @@ struct SettingsView: View {
                 Text("You are responsible for telling people they are being recorded and for following the rules of each meeting, interview or exam.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            HStack { Spacer(); Button("Save") { model.saveConfig() }.buttonStyle(FilledButton(bg: Theme.indigo)).keyboardShortcut(.defaultAction) }
+            HStack { Spacer(); SaveButton { model.saveConfig() }.keyboardShortcut(.defaultAction) }
         }
         .formStyle(.grouped)
         .textFieldStyle(.roundedBorder)
