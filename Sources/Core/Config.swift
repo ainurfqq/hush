@@ -54,6 +54,8 @@ public struct Config: Codable, Equatable {
     public var liveAsrModel: String = "ggml-small-q5_1.bin"
     /// "auto", "id", "en", …
     public var language: String = "auto"
+    /// With "auto": the languages spoken in meetings. A guess outside this list is transcribed again in the last listed language heard.
+    public var languages: [String] = ["id", "en"]
     public var storageDir: String? = nil
     public var prompterOpacity: Double = 0.85
     public var prompterAutoAnswer: Bool = true
@@ -73,7 +75,7 @@ public struct Config: Codable, Equatable {
     public init() {}
 
     enum CodingKeys: String, CodingKey {
-        case provider, prompterProvider, model, prompterModel, openAIBaseURL, claudePath, codexPath, claudeConfigDir, codexHome, asrModel, liveAsrModel, language, storageDir,
+        case provider, prompterProvider, model, prompterModel, openAIBaseURL, claudePath, codexPath, claudeConfigDir, codexHome, asrModel, liveAsrModel, language, languages, storageDir,
              prompterOpacity, prompterAutoAnswer, prompterStyle, contextFile, userName, keepAudio, acknowledgedAINotice, acknowledgedConsent, setupDone, maskSecrets, lastHiddenCheck
     }
     /// Tolerant decoding: unknown or missing keys fall back to defaults, so old config files keep working.
@@ -92,6 +94,7 @@ public struct Config: Codable, Equatable {
         asrModel = (try? c.decode(String.self, forKey: .asrModel)) ?? d.asrModel
         liveAsrModel = (try? c.decode(String.self, forKey: .liveAsrModel)) ?? d.liveAsrModel
         language = (try? c.decode(String.self, forKey: .language)) ?? d.language
+        languages = (try? c.decode([String].self, forKey: .languages)) ?? d.languages
         storageDir = try? c.decode(String.self, forKey: .storageDir)
         prompterOpacity = (try? c.decode(Double.self, forKey: .prompterOpacity)) ?? d.prompterOpacity
         prompterAutoAnswer = (try? c.decode(Bool.self, forKey: .prompterAutoAnswer)) ?? d.prompterAutoAnswer

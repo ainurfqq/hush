@@ -756,7 +756,24 @@ struct SettingsView: View {
                     Text("Same as final transcript (slower, more accurate)").tag("")
                 }
                 Picker("Language", selection: $model.config.language) {
-                    Text("Auto (Indonesian + English mix)").tag("auto"); Text("Indonesian").tag("id"); Text("English").tag("en")
+                    Text("Auto (mixed languages)").tag("auto"); Text("Indonesian").tag("id"); Text("English").tag("en")
+                }
+                if model.config.language == "auto" {
+                    HStack(spacing: 14) {
+                        Text("Languages in your meetings").foregroundStyle(.secondary)
+                        Spacer()
+                        ForEach([("id", "Indonesian"), ("en", "English"), ("jw", "Javanese")], id: \.0) { code, name in
+                            Toggle(name, isOn: Binding(
+                                get: { model.config.languages.contains(code) },
+                                set: { on in
+                                    if on { if !model.config.languages.contains(code) { model.config.languages.append(code) } }
+                                    else if model.config.languages.count > 1 { model.config.languages.removeAll { $0 == code } }
+                                }))
+                            .toggleStyle(.checkbox)
+                        }
+                    }
+                    Text("Hush only keeps these languages. Lines it guesses as another language are transcribed again. Javanese is less accurate than Indonesian.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 Text("Meetings are stored in \(Paths.meetings.path)").font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
             }

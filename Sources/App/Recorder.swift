@@ -107,7 +107,7 @@ final class Recorder {
             defer { try? FileManager.default.removeItem(at: f) }
             do {
                 try WAV.write(audio[...], to: f)
-                let p = try Transcriber.transcribe(f, live: true)
+                let c = Config.load(); let p = try Transcriber.transcribe(f, language: c.language, config: c, live: true)
                 let dur = Double(audio.count) / 16000
                 guard !p.text.isEmpty, p.noSpeech < 0.8, !Transcriber.isLikelyHallucination(p.text, duration: dur),
                       !Transcriber.isRepetitive(p.text) else { return }
@@ -155,7 +155,7 @@ final class FileFeeder {
                         do {
                             let f = FileManager.default.temporaryDirectory.appendingPathComponent("hush-sim-\(UUID().uuidString).wav")
                             try WAV.write(chunk[...], to: f); defer { try? FileManager.default.removeItem(at: f) }
-                            let p = try Transcriber.transcribe(f, live: true)
+                            let c = Config.load(); let p = try Transcriber.transcribe(f, language: c.language, config: c, live: true)
                             if !p.text.isEmpty { onLine?(LiveLine(t: t, who: who, text: p.text)) }
                         } catch { Log.write("simulate: \(error)") }
                     }

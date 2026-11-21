@@ -123,6 +123,9 @@ public struct RedactingProvider: AIProvider {
     public func complete(system: String, user: String, fast: Bool) throws -> String {
         try inner.complete(system: system, user: Redact.mask(user), fast: fast)
     }
+    public func stream(system: String, user: String, fast: Bool, onText: @escaping (String) -> Void) throws -> String {
+        try inner.stream(system: system, user: Redact.mask(user), fast: fast, onText: onText)
+    }
 }
 
 /// Which AI is available on this Mac, for first-run setup.

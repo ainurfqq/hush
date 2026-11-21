@@ -124,8 +124,27 @@ public enum Transcriber {
                 return TimedWord(start: a, end: b, word: t)
             }
         }
-        return TranscriptPiece(text: text, language: language == "auto" ? lang.map(langCode) : language, noSpeech: noSpeech,
-                               avgLogprob: avgLogprob, words: words)
+        let piece = TranscriptPiece(text: text, language: language == "auto" ? lang.map(langCode) : language, noSpeech: noSpeech,
+                                    avgLogprob: avgLogprob, words: words)
+        // Auto mode with a language list: a guess outside the list (Greek, Korean… on short or noisy audio) is redone
+        // in the last listed language heard, so the line keeps its words instead of turning into another script.
+        if language == "auto", !config.languages.isEmpty, !text.isEmpty, let got = piece.language {
+            if config.languages.contains(got) { lastListed.set(got) }
+            else {
+                let redo = lastListed.get(in: config.languages) ?? config.languages[0]
+                Log.write("language guess \(got) not in \(config.languages.joined(separator: ",")); redoing as \(redo)")
+                return try transcribe(wav, language: redo, config: config, live: live)
+            }
+        }
+        return piece
+    }
+
+    /// The last language from the user's list that whisper detected (shared by live and final transcription).
+    static let lastListed = LastLanguage()
+    final class LastLanguage {
+        private var value: String?; private let lock = NSLock()
+        func set(_ v: String) { lock.lock(); value = v; lock.unlock() }
+        func get(in list: [String]) -> String? { lock.lock(); defer { lock.unlock() }; return value.flatMap { list.contains($0) ? $0 : nil } }
     }
 
     public static func cleanText(_ s: String) -> String {

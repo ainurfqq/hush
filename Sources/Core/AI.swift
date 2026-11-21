@@ -5,6 +5,14 @@ import Security
 public protocol AIProvider {
     var name: String { get }
     func complete(system: String, user: String, fast: Bool) throws -> String
+    /// Like `complete`, but calls `onText` with the answer so far while it is written. Default: one call at the end.
+    func stream(system: String, user: String, fast: Bool, onText: @escaping (String) -> Void) throws -> String
+}
+
+extension AIProvider {
+    public func stream(system: String, user: String, fast: Bool, onText: @escaping (String) -> Void) throws -> String {
+        let t = try complete(system: system, user: user, fast: fast); onText(t); return t
+    }
 }
 
 public enum AI {
@@ -69,6 +77,31 @@ public struct ClaudeCLIProvider: AIProvider {
             throw HushError.provider("claude exit \(r.status): \(msg.suffix(300))")
         }
         return r.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Streams the answer (stream-json with partial messages) so the prompter can show the first words early.
+    public func stream(system: String, user: String, fast: Bool, onText: @escaping (String) -> Void) throws -> String {
+        guard let exe = Shell.which("claude", override: path) else { throw HushError.missing("claude CLI (install Claude Code, or set its path in Settings)") }
+        var args = arguments(system: system, fast: fast)
+        if let i = args.firstIndex(of: "--output-format"), i + 1 < args.count { args[i + 1] = "stream-json" }
+        args += ["--verbose", "--include-partial-messages"]
+        var soFar = "", final: String?, failure: String?
+        let r = try Shell.run(exe, args, stdin: user, timeout: fast ? 60 : 300,
+                              env: configDir.isEmpty ? nil : ["CLAUDE_CONFIG_DIR": configDir],
+                              cwd: FileManager.default.temporaryDirectory.path) { line in
+            guard let j = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any] else { return }
+            if j["type"] as? String == "stream_event", let ev = j["event"] as? [String: Any],
+               let d = ev["delta"] as? [String: Any], d["type"] as? String == "text_delta", let t = d["text"] as? String {
+                soFar += t; onText(soFar)
+            } else if j["type"] as? String == "result" {
+                if j["is_error"] as? Bool == true { failure = (j["result"] as? String) ?? "unknown error" } else { final = j["result"] as? String }
+            }
+        }
+        if r.status != 0 || failure != nil {
+            let msg = [failure ?? "", r.stderr].map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.first { !$0.isEmpty } ?? "no message"
+            throw HushError.provider("claude exit \(r.status): \(msg.suffix(300))")
+        }
+        return (final ?? soFar).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

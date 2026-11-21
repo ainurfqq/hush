@@ -28,7 +28,8 @@ public enum Shell {
     /// Runs a program, feeding `stdin`, with a timeout. Never goes through a shell, so arguments are not re-parsed.
     @discardableResult
     public static func run(_ exe: String, _ args: [String], stdin: String? = nil, timeout: TimeInterval = 600,
-                           env: [String: String]? = nil, cwd: String? = nil) throws -> ShellResult {
+                           env: [String: String]? = nil, cwd: String? = nil,
+                           onStdoutLine: ((String) -> Void)? = nil) throws -> ShellResult {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: exe)
         p.arguments = args
@@ -42,7 +43,22 @@ public enum Shell {
         var outData = Data(), errData = Data()
         let group = DispatchGroup()
         group.enter(); group.enter()
-        DispatchQueue.global().async { outData = outPipe.fileHandleForReading.readDataToEndOfFile(); group.leave() }
+        DispatchQueue.global().async {
+            let h = outPipe.fileHandleForReading
+            if let onStdoutLine {
+                // Hand over each complete line as it arrives (for streaming output).
+                var buf = Data()
+                while case let d = h.availableData, !d.isEmpty {
+                    outData.append(d); buf.append(d)
+                    while let nl = buf.firstIndex(of: 10) {
+                        onStdoutLine(String(decoding: buf[buf.startIndex..<nl], as: UTF8.self))
+                        buf.removeSubrange(buf.startIndex...nl)
+                    }
+                }
+                if !buf.isEmpty { onStdoutLine(String(decoding: buf, as: UTF8.self)) }
+            } else { outData = h.readDataToEndOfFile() }
+            group.leave()
+        }
         DispatchQueue.global().async { errData = errPipe.fileHandleForReading.readDataToEndOfFile(); group.leave() }
         try p.run()
         if let stdin { inPipe.fileHandleForWriting.write(Data(stdin.utf8)) }

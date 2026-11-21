@@ -152,7 +152,14 @@ final class AppModel: ObservableObject {
         let sys = Answerer.system(userName: config.userName), user = Answerer.prompt(question: question, recent: recent, context: ctx)
         let t0 = Date()
         answerQ.async {
-            let result = Result { try provider.complete(system: sys, user: user, fast: true) }
+            var firstLogged = false
+            let result = Result { try provider.stream(system: sys, user: user, fast: true) { soFar in
+                DispatchQueue.main.async {
+                    guard self.answering else { return }
+                    if !firstLogged { firstLogged = true; Log.write(String(format: "prompter first words %.2f s via %@", Date().timeIntervalSince(t0), provider.name)) }
+                    self.prompterAnswer = soFar; self.prompterStatus = "Answering…"
+                }
+            } }
             DispatchQueue.main.async {
                 self.answering = false
                 let dt = Date().timeIntervalSince(t0)
