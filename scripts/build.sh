@@ -17,8 +17,15 @@ FLAGS=(-target "$TARGET" -swift-version 5 $OPT -module-cache-path build/obj/cach
 echo "==> hush (CLI)"
 swiftc "${FLAGS[@]}" -module-name HushCLI Sources/Core/*.swift Sources/CLI/main.swift -o "$APP/Contents/MacOS/hush-cli"
 
+# DMG build (HUSH_DMG=1, after scripts/dmg-deps.sh): add Sparkle for in-app updates and the bundled whisper-server.
+EXTRA=()
+if [ "${HUSH_DMG:-0}" = "1" ]; then
+  [ -d .cache/Sparkle.framework ] && [ -x .cache/bin/whisper-server ] || { echo "Run scripts/dmg-deps.sh first." >&2; exit 1; }
+  EXTRA=(-F .cache -framework Sparkle -Xlinker -rpath -Xlinker @executable_path/../Frameworks)
+fi
+
 echo "==> Hush (app)"
-swiftc "${FLAGS[@]}" -parse-as-library -module-name Hush Sources/Core/*.swift Sources/App/*.swift \
+swiftc "${FLAGS[@]}" ${EXTRA[@]+"${EXTRA[@]}"} -parse-as-library -module-name Hush Sources/Core/*.swift Sources/App/*.swift \
   -framework AppKit -framework SwiftUI -framework AVFoundation -framework CoreAudio -framework Carbon -framework ScreenCaptureKit \
   -o "$APP/Contents/MacOS/Hush"
 
@@ -26,6 +33,11 @@ cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp scripts/fetch-engines.sh scripts/engines.lock "$APP/Contents/Resources/"
 mkdir -p "$APP/Contents/Resources/Fonts" && cp Resources/Fonts/* "$APP/Contents/Resources/Fonts/"
 [ -f Resources/AppIcon.icns ] && cp Resources/AppIcon.icns "$APP/Contents/Resources/"
+if [ "${HUSH_DMG:-0}" = "1" ]; then
+  mkdir -p "$APP/Contents/Frameworks"
+  cp -R .cache/Sparkle.framework "$APP/Contents/Frameworks/"
+  cp .cache/bin/whisper-server "$APP/Contents/MacOS/whisper-server"
+fi
 
 # Signing: the local "Hush Local Signing" certificate when present (scripts/make-signing-cert.sh), so macOS keeps
 # Microphone / Screen Recording permissions across updates; otherwise ad-hoc. Neither is an Apple Developer ID.

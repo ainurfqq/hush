@@ -11,13 +11,20 @@ public enum Engines {
         if live, !c.liveAsrModel.isEmpty, FileManager.default.fileExists(atPath: liveURL.path) { return liveURL }
         return Paths.models.appendingPathComponent(c.asrModel)
     }
-    public static var whisperServer: String? { Shell.which("whisper-server") }
+    /// The DMG build carries its own whisper-server next to the app binary; other builds use Homebrew's.
+    public static var whisperServer: String? {
+        if let exe = Bundle.main.executableURL?.resolvingSymlinksInPath() {
+            let bundled = exe.deletingLastPathComponent().appendingPathComponent("whisper-server").path
+            if FileManager.default.isExecutableFile(atPath: bundled) { return bundled }
+        }
+        return Shell.which("whisper-server")
+    }
 
     /// Human-readable readiness report (used by `hush doctor` and the app's setup panel).
     public static func check(_ c: Config = .load()) -> [(String, Bool, String)] {
         let fm = FileManager.default
         return [
-            ("whisper-server (brew install whisper-cpp)", whisperServer != nil, whisperServer ?? "not found"),
+            ("whisper-server", whisperServer != nil, whisperServer ?? "not found"),
             ("ASR model \(c.asrModel)", fm.fileExists(atPath: asrModel(c).path), asrModel(c).path),
             ("sherpa-onnx diarizer", fm.isExecutableFile(atPath: sherpaDiarizer.path), sherpaDiarizer.path),
             ("segmentation model", fm.fileExists(atPath: segmentationModel.path), segmentationModel.path),

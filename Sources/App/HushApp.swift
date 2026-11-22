@@ -61,6 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Hotkeys.shared.register(keyCode: kVK_ANSI_A, modifiers: mods) { m.answerLastQuestion() }
         Hotkeys.shared.register(keyCode: kVK_ANSI_R, modifiers: mods) { m.toggleRecording() }
         recoverInterrupted()
+        Updater.shared.start()
         if !Self.model.config.setupDone && !CommandLine.arguments.contains(where: { $0.hasPrefix("--") }) { Self.model.detectAI() }
         TestHooks.run(Self.model, CommandLine.arguments)
     }
@@ -94,6 +95,7 @@ enum TestHooks {
             if let n = m.prompterWindowNumber { print("PROMPTER_WINDOW \(n)"); fflush(stdout) }
             quit(after: Double(argv[i + 1]) ?? 10)
         }
+        if argv.contains("--check-updates") { DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { Updater.shared.checkNow() } }   // QA: Sparkle flow
         if argv.contains("--demo") { demo(m); if argv.contains("--prompter") { m.showPrompter() } }
         if let i = argv.firstIndex(of: "--notch"), i + 1 < argv.count {     // QA: --notch collapsed|hover|question
             demo(m); m.isRecording = true; m.elapsed = 768; m.sysLevel = 0.06

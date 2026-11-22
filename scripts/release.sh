@@ -9,7 +9,7 @@ cd "$(dirname "$0")/.."
 [ -z "$(git status --porcelain)" ] || { echo "Commit your changes first." >&2; exit 1; }
 
 # Keep the app and CLI version in step with the tag.
-/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $V" Resources/Info.plist
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $V" -c "Set :CFBundleVersion $V" Resources/Info.plist
 sed -i '' "s/public static let version = \"[0-9.]*\"/public static let version = \"$V\"/" Sources/Core/MCPServer.swift
 if [ -n "$(git status --porcelain)" ]; then git commit -qam "Release $TAG"; fi
 git push -q origin HEAD
@@ -29,5 +29,12 @@ git -C "$TMP/tap" config user.email "$(git config user.email)"
 mkdir -p "$TMP/tap/Formula"
 sed -e "s|@VERSION@|$V|g" -e "s|@SHA256@|$SHA|g" packaging/homebrew/hush.rb.in > "$TMP/tap/Formula/hush.rb"
 ( cd "$TMP/tap" && git add Formula/hush.rb && git commit -qm "hush $V" && git push -q )
-echo "Released $TAG  sha256=$SHA"
-echo "Users update with: brew update && brew upgrade hush"
+echo "Released $TAG for Homebrew  sha256=$SHA"
+
+# DMG for the website + in-app updates (Sparkle). Hush.dmg is a fixed name for the site's download link.
+scripts/make-dmg.sh
+cp "build/Hush-$V.dmg" build/Hush.dmg
+gh release view "$TAG" -R "$REPO" >/dev/null 2>&1 || gh release create "$TAG" -R "$REPO" --title "Hush $V" --notes "Hush $V"
+gh release upload "$TAG" -R "$REPO" --clobber "build/Hush-$V.dmg" build/Hush.dmg
+git add docs/appcast.xml && git commit -qm "appcast: Hush $V" && git push -q origin HEAD
+echo "Users update with: the app (DMG) or brew update && brew upgrade hush"

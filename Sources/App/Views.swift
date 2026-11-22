@@ -28,6 +28,9 @@ struct MenuContent: View {
                 }
                 MenuRow(icon: "gearshape", title: "Settings…", shortcut: "⌘,") { open("settings") }
                     .keyboardShortcut(",", modifiers: .command)
+                if Updater.available {
+                    MenuRow(icon: "arrow.down.circle", title: "Check for updates…", shortcut: nil) { Updater.shared.checkNow() }
+                }
                 Divider().padding(.vertical, 4)
                 MenuRow(icon: "power", title: "Quit Hush", shortcut: "⌘Q") { NSApp.terminate(nil) }
                     .keyboardShortcut("q", modifiers: .command)

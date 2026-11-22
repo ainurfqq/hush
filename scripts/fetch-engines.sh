@@ -9,7 +9,9 @@ mkdir -p "$BASE/models" "$BASE/engines"
 say() { printf '  %s\n' "$*"; }
 sha() { shasum -a 256 "$1" | awk '{print $1}'; }
 
-if ! command -v whisper-server >/dev/null 2>&1 && [ ! -x /opt/homebrew/bin/whisper-server ]; then
+# The DMG build bundles whisper-server in Contents/MacOS, so Homebrew is not needed there.
+BUNDLED="$(dirname "$0")/../MacOS/whisper-server"
+if [ ! -x "$BUNDLED" ] && ! command -v whisper-server >/dev/null 2>&1 && [ ! -x /opt/homebrew/bin/whisper-server ]; then
   if command -v brew >/dev/null 2>&1; then say "installing whisper.cpp with Homebrew…"; brew install whisper-cpp
   else echo "Homebrew is needed for whisper.cpp: https://brew.sh then run: brew install whisper-cpp" >&2; exit 1; fi
 fi
