@@ -711,9 +711,15 @@ struct SettingsView: View {
                     Text("Uses your Codex login (run `codex login` once). Works with a free ChatGPT account using the gpt-6-luna model; Hush switches to it automatically if your plan does not allow the default model.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                if model.config.provider == .openAICompatible || model.config.provider == .anthropic {
+                if [.openAICompatible, .anthropic, .gemini].contains(model.config.provider) {
                     SecureField("API key", text: $model.settingsKey, prompt: Text("stored in the macOS Keychain"))
-                    Button("Save key") { Keychain.set(model.config.provider == .anthropic ? "anthropic" : "openai", apiKey); model.settingsKey = ""; model.settingsTest = "Key saved to Keychain." }
+                    Button("Save key") {
+                        Keychain.set(model.config.provider == .anthropic ? "anthropic" : model.config.provider == .gemini ? "gemini" : "openai", apiKey)
+                        model.settingsKey = ""; model.settingsTest = "Key saved to Keychain."
+                    }
+                }
+                if model.config.provider == .gemini {
+                    Text(GeminiGuideView.privacyNote).font(.caption).foregroundStyle(.secondary)
                 }
                 Button("Set up free AI on this Mac (Ollama)…") { model.openWindowAction?("ollama") }.buttonStyle(LinkStyle())
                 HStack {

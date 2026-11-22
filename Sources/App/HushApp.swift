@@ -21,6 +21,8 @@ struct HushApp: App {
             .windowResizability(.contentSize)
         Window("Free AI with ChatGPT", id: "codex") { CodexGuideView().environmentObject(AppDelegate.model) }
             .windowResizability(.contentSize)
+        Window("Free AI with Google Gemini", id: "gemini") { GeminiGuideView().environmentObject(AppDelegate.model) }
+            .windowResizability(.contentSize)
         Window("Free AI on this Mac", id: "ollama") { OllamaGuideView().environmentObject(AppDelegate.model) }
             .windowResizability(.contentSize)
         Window("Hush Settings", id: "settings") { SettingsView().environmentObject(AppDelegate.model) }

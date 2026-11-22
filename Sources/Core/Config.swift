@@ -19,7 +19,7 @@ public enum Paths {
 }
 
 public enum ProviderKind: String, Codable, CaseIterable {
-    case none, claudeCLI = "claude-cli", codexCLI = "codex-cli", openAICompatible = "openai-compatible", anthropic
+    case none, claudeCLI = "claude-cli", codexCLI = "codex-cli", openAICompatible = "openai-compatible", anthropic, gemini
 
     public var label: String {
         switch self {
@@ -28,6 +28,7 @@ public enum ProviderKind: String, Codable, CaseIterable {
         case .codexCLI: return "Codex CLI"
         case .openAICompatible: return "OpenAI-compatible (OpenAI, Ollama, LM Studio, OpenRouter)"
         case .anthropic: return "Anthropic API"
+        case .gemini: return "Google Gemini API (free key from AI Studio)"
         }
     }
 }

@@ -226,6 +226,42 @@ public enum HTTP {
         if let error { throw error }
         return result!
     }
+
+    /// Sends `req` and hands over each response line as it arrives (for streamed replies).
+    /// Returns the whole body (useful for error messages) and the status code.
+    public static func streamLines(_ req: URLRequest, onLine: @escaping (String) -> Void) throws -> (Data, Int) {
+        let d = LineDelegate(onLine: onLine)
+        let cfg = URLSessionConfiguration.ephemeral
+        cfg.timeoutIntervalForRequest = req.timeoutInterval
+        let session = URLSession(configuration: cfg, delegate: d, delegateQueue: nil)
+        session.dataTask(with: req).resume()
+        d.done.wait()
+        session.finishTasksAndInvalidate()
+        if let e = d.error { throw e }
+        return (d.body, d.status)
+    }
+
+    final class LineDelegate: NSObject, URLSessionDataDelegate {
+        let onLine: (String) -> Void
+        let done = DispatchSemaphore(value: 0)
+        var body = Data(), buf = Data(), status = 0, error: Error?
+        init(onLine: @escaping (String) -> Void) { self.onLine = onLine }
+        func urlSession(_ s: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
+                        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+            status = (response as? HTTPURLResponse)?.statusCode ?? 0; completionHandler(.allow)
+        }
+        func urlSession(_ s: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+            body.append(data); buf.append(data)
+            while let nl = buf.firstIndex(of: 10) {
+                onLine(String(decoding: buf[buf.startIndex..<nl], as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines))
+                buf.removeSubrange(buf.startIndex...nl)
+            }
+        }
+        func urlSession(_ s: URLSession, task: URLSessionTask, didCompleteWithError e: Error?) {
+            if !buf.isEmpty { onLine(String(decoding: buf, as: UTF8.self)); buf.removeAll() }
+            error = e; done.signal()
+        }
+    }
 }
 
 public struct MultipartForm {

@@ -41,6 +41,11 @@ public enum AI {
         case .openAICompatible:
             return OpenAICompatibleProvider(baseURL: c.openAIBaseURL, model: c.model.isEmpty ? "llama3.2" : c.model,
                                             fastModel: c.prompterModel, apiKey: Keychain.get("openai"))
+        case .gemini:
+            var p = OpenAICompatibleProvider(baseURL: Gemini.baseURL, model: c.model.isEmpty ? Gemini.defaultModel : c.model,
+                                             fastModel: c.prompterModel.isEmpty ? Gemini.fastModel : c.prompterModel, apiKey: Keychain.get("gemini"))
+            p.fallbackModels = [Gemini.fastModel]
+            return p
         case .anthropic:
             return AnthropicProvider(apiKey: Keychain.get("anthropic") ?? "", model: c.model, fastModel: c.prompterModel)
         }
@@ -146,38 +151,100 @@ public struct CodexCLIProvider: AIProvider {
     }
 }
 
-// MARK: - OpenAI-compatible (OpenAI, OpenRouter, Ollama, LM Studio, vLLM…)
+/// Google's Gemini API through its OpenAI-compatible endpoint (https://ai.google.dev/gemini-api/docs/openai).
+public enum Gemini {
+    public static let baseURL = "https://generativelanguage.googleapis.com/v1beta/openai"
+    public static let defaultModel = "gemini-flash-latest"
+    /// Used for live answers (about 1 s to the first word in a 2026-11-22 test) and when the main model is busy.
+    public static let fastModel = "gemini-flash-lite-latest"
+    public static let keyPage = "https://aistudio.google.com/apikey"
+}
+
+// MARK: - OpenAI-compatible (OpenAI, OpenRouter, Ollama, LM Studio, vLLM, Gemini…)
 
 public struct OpenAICompatibleProvider: AIProvider {
     public var baseURL: String, model: String, fastModel: String, apiKey: String?
+    /// Tried in order when the server is busy (HTTP 429/5xx) or slow. Each try then gets a shorter timeout.
+    public var fallbackModels: [String] = []
     public var name: String { "openai-compatible:\(model)" }
     public init(baseURL: String, model: String, fastModel: String = "", apiKey: String? = nil) {
         self.baseURL = baseURL; self.model = model; self.fastModel = fastModel; self.apiKey = apiKey
     }
 
-    public func request(system: String, user: String, fast: Bool) throws -> URLRequest {
+    func models(fast: Bool) -> [String] {
+        let first = fast && !fastModel.isEmpty ? fastModel : model
+        return [first] + fallbackModels.filter { $0 != first }
+    }
+
+    static func busy(_ status: Int) -> Bool { status == 429 || status >= 500 }
+
+    /// "HTTP 503: This model is currently experiencing high demand…" instead of the raw JSON.
+    static func errorText(_ status: Int, _ body: Data) -> String {
+        let j = try? JSONSerialization.jsonObject(with: body)
+        let obj = (j as? [[String: Any]])?.first ?? (j as? [String: Any])
+        let msg = ((obj?["error"] as? [String: Any])?["message"] as? String) ?? String(decoding: body.prefix(300), as: UTF8.self)
+        return "HTTP \(status): \(msg)"
+    }
+
+    public func request(system: String, user: String, fast: Bool, stream: Bool = false, model chosen: String? = nil) throws -> URLRequest {
         let base = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
         guard let url = URL(string: base + "/chat/completions") else { throw HushError.provider("bad base URL \(baseURL)") }
         var req = URLRequest(url: url)
-        req.httpMethod = "POST"; req.timeoutInterval = fast ? 60 : 300
+        req.httpMethod = "POST"
+        req.timeoutInterval = fallbackModels.isEmpty ? (fast ? 60 : 300) : (fast ? 15 : 120)
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let k = apiKey, !k.isEmpty { req.setValue("Bearer \(k)", forHTTPHeaderField: "Authorization") }
         let body: [String: Any] = [
-            "model": fast && !fastModel.isEmpty ? fastModel : model,
+            "model": chosen ?? models(fast: fast)[0],
             "messages": [["role": "system", "content": system], ["role": "user", "content": user]],
-            "stream": false,
+            "stream": stream,
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         return req
     }
 
     public func complete(system: String, user: String, fast: Bool) throws -> String {
-        let (data, status) = try HTTP.send(try request(system: system, user: user, fast: fast))
-        guard status == 200 else { throw HushError.provider("HTTP \(status): \(String(decoding: data.prefix(300), as: UTF8.self))") }
-        guard let j = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let choices = j["choices"] as? [[String: Any]], let msg = choices.first?["message"] as? [String: Any],
-              let text = msg["content"] as? String else { throw HushError.provider("unexpected response shape") }
-        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+        try withFallback(fast: fast) { m in
+            let (data, status) = try HTTP.send(try request(system: system, user: user, fast: fast, model: m))
+            guard status == 200 else { throw Attempt(error: HushError.provider(Self.errorText(status, data)), retryable: Self.busy(status)) }
+            guard let j = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let choices = j["choices"] as? [[String: Any]], let msg = choices.first?["message"] as? [String: Any],
+                  let text = msg["content"] as? String else { throw HushError.provider("unexpected response shape") }
+            return text.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+
+    /// Server-sent events ("data: {…}" lines with choices[0].delta.content), so the prompter shows the first words early.
+    public func stream(system: String, user: String, fast: Bool, onText: @escaping (String) -> Void) throws -> String {
+        try withFallback(fast: fast) { m in
+            var soFar = ""
+            let (body, status) = try HTTP.streamLines(try request(system: system, user: user, fast: fast, stream: true, model: m)) { line in
+                guard line.hasPrefix("data:") else { return }
+                let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+                guard payload != "[DONE]", let j = try? JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any],
+                      let delta = (j["choices"] as? [[String: Any]])?.first?["delta"] as? [String: Any],
+                      let t = delta["content"] as? String, !t.isEmpty else { return }
+                soFar += t; onText(soFar)
+            }
+            guard status == 200 else { throw Attempt(error: HushError.provider(Self.errorText(status, body)), retryable: Self.busy(status)) }
+            guard !soFar.isEmpty else { throw Attempt(error: HushError.provider("empty streamed reply"), retryable: true) }
+            return soFar.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+
+    /// A failed try; `retryable` means the next fallback model may work (busy server, timeout, empty reply).
+    struct Attempt: Error { let error: Error; let retryable: Bool }
+
+    func withFallback(fast: Bool, _ run: (String) throws -> String) throws -> String {
+        let list = models(fast: fast)
+        for (i, m) in list.enumerated() {
+            let last = i == list.count - 1
+            do { return try run(m) }
+            catch let a as Attempt { if !a.retryable || last { throw a.error } }
+            catch let e as URLError { if last { throw e } }
+            Log.write("AI: \(m) busy or slow, trying \(list[i + 1])")
+        }
+        throw HushError.provider("no model")
     }
 }
 

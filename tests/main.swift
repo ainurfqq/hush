@@ -318,6 +318,31 @@ test("OpenAI-compatible provider: request shape + reply parsing against a mock s
     expect((try? OpenAICompatibleProvider(baseURL: "http://127.0.0.1:\(err.port)/v1", model: "m").complete(system: "", user: "", fast: false)) == nil, "HTTP 401 throws")
 }
 
+test("OpenAI-compatible streaming (Gemini, Ollama): partial text in order, [DONE] ends, errors throw") {
+    let sse = "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n" +
+              "data: {\"choices\":[{\"delta\":{\"content\":\"Halo, \"}}]}\n\n" +
+              "data: {\"choices\":[{\"delta\":{\"content\":\"apa kabar?\"}}]}\n\ndata: [DONE]\n\n"
+    let srv = try MockServer { _ in (200, sse) }
+    let p = OpenAICompatibleProvider(baseURL: "http://127.0.0.1:\(srv.port)/v1beta/openai", model: Gemini.defaultModel, apiKey: "g-test")
+    var parts: [String] = []
+    let out = try p.stream(system: "SYS", user: "Q", fast: true) { parts.append($0) }
+    expect(out == "Halo, apa kabar?", out)
+    expect(parts == ["Halo, ", "Halo, apa kabar?"], "\(parts)")
+    expect(srv.lastRequest.contains("\"stream\":true") && srv.lastRequest.contains("\"model\":\"gemini-flash-latest\""), "stream flag + model")
+    let err = try MockServer { _ in (429, #"{"error":{"message":"quota"}}"#) }
+    let e = OpenAICompatibleProvider(baseURL: "http://127.0.0.1:\(err.port)/v1", model: "m")
+    expect((try? e.stream(system: "", user: "", fast: true) { _ in }) == nil, "HTTP 429 throws (prompter then uses the notes file)")
+    let g = AI.baseProvider({ var c = Config(); c.provider = .gemini; c.model = ""; return c }(), forPrompter: false) as? OpenAICompatibleProvider
+    expect(g?.baseURL == Gemini.baseURL && g?.model == Gemini.defaultModel, "gemini preset")
+    expect(g?.fastModel == Gemini.fastModel && g?.fallbackModels == [Gemini.fastModel], "gemini: lite model for the prompter and as fallback")
+    let busy = try MockServer { req in req.contains("\"model\":\"main\"") ? (503, #"[{"error":{"code":503,"message":"high demand"}}]"#) : (200, sse) }
+    var fb = OpenAICompatibleProvider(baseURL: "http://127.0.0.1:\(busy.port)/v1", model: "main"); fb.fallbackModels = ["lite"]
+    expect((try? fb.stream(system: "", user: "", fast: false) { _ in }) == "Halo, apa kabar?", "503 on the main model → fallback answers (stream)")
+    let only = OpenAICompatibleProvider(baseURL: "http://127.0.0.1:\(busy.port)/v1", model: "main")
+    do { _ = try only.complete(system: "", user: "", fast: false); expect(false, "should throw") }
+    catch { expect("\(error)".contains("HTTP 503: high demand"), "readable error: \(error)") }
+}
+
 test("Anthropic provider: headers, body, text parsing, refusal handling (mock server)") {
     let srv = try MockServer { _ in (200, #"{"type":"message","stop_reason":"end_turn","content":[{"type":"thinking","thinking":""},{"type":"text","text":"Halo "},{"type":"text","text":"Rina."}]}"#) }
     var p = AnthropicProvider(apiKey: "sk-ant-test")

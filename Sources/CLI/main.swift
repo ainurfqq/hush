@@ -144,6 +144,7 @@ case "doctor":
     case .codexCLI: print("     codex: \(Shell.which("codex", override: c.codexPath) ?? "NOT FOUND")")
     case .anthropic: print("     key in Keychain: \(Keychain.get("anthropic") != nil)")
     case .openAICompatible: print("     base URL: \(c.openAIBaseURL)  key set: \(Keychain.get("openai") != nil)")
+    case .gemini: print("     Gemini key set: \(Keychain.get("gemini") != nil)  model: \(c.model.isEmpty ? Gemini.defaultModel : c.model)")
     case .none: break
     }
     print("DATA \(Paths.base.path)\nMEET \(Paths.meetings.path)")

@@ -257,11 +257,13 @@ final class AIChoices: ObservableObject {
     @Published var claude = false
     @Published var codex = false
     @Published var ollama = false
+    @Published var gemini = false
     func refresh() {
         DispatchQueue.global().async {
             let c = Shell.which("claude") != nil, x = Shell.which("codex") != nil
             let o = Shell.which("ollama") != nil || FileManager.default.fileExists(atPath: "/Applications/Ollama.app")
-            DispatchQueue.main.async { self.claude = c; self.codex = x; self.ollama = o }
+            let g = Keychain.get("gemini") != nil
+            DispatchQueue.main.async { self.claude = c; self.codex = x; self.ollama = o; self.gemini = g }
         }
     }
 }
@@ -279,6 +281,10 @@ struct AIChoiceCards: View {
             choice(.codexCLI, "Free ChatGPT account (Codex)", found: ai.codex, badge: "Free",
                    pros: "Works with a free OpenAI account. Good summaries (tested).", cons: "Text goes to OpenAI. Free usage limits are not published.") {
                 model.openWindowAction?("codex")
+            }
+            choice(.gemini, "Free Google Gemini", found: ai.gemini, badge: "Free · fast",
+                   pros: "Quick answers and good Indonesian. A free API key from Google AI Studio.", cons: "On the free tier Google may use the text Hush sends (meeting transcript) to improve its products.") {
+                model.openWindowAction?("gemini")
             }
             choice(.openAICompatible, "Free on this Mac (Ollama)", found: ai.ollama, badge: "Fully private",
                    pros: "Nothing leaves your Mac, no account.", cons: "Weaker; slow on 8 GB Macs. About 2–5 GB download.") {
@@ -305,7 +311,7 @@ struct AIChoiceCards: View {
                     }
                     Text("+ " + pros).font(.system(size: 12)).foregroundStyle(Theme.ink2).fixedSize(horizontal: false, vertical: true)
                     Text("– " + cons).font(.system(size: 12)).foregroundStyle(Theme.ink3).fixedSize(horizontal: false, vertical: true)
-                    if (kind == .codexCLI || kind == .openAICompatible) && !on {
+                    if (kind == .codexCLI || kind == .openAICompatible || kind == .gemini) && !on {
                         Text("Opens a short setup guide →").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.indigo)
                     }
                 }
