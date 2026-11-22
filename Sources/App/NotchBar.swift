@@ -119,7 +119,7 @@ final class NotchController {
     private var autoCloseDue: Bool { Date().timeIntervalSince(questionShownAt) > 20 }
 
     func showQuestion() {
-        if !panel.isVisible { panel.orderFrontRegardless() }
+        if !panel.isVisible { show() }          // show() places the bar at the notch first (else it opens at 0,0)
         state.mode = .question
         questionShownAt = Date()
         schedule(after: 20)

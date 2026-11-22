@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import Combine
 
 /// App-wide state: recording, live transcript, prompter, library.
 final class AppModel: ObservableObject {
@@ -39,6 +40,22 @@ final class AppModel: ObservableObject {
     private var panel: PrompterPanel?
     lazy var notch = NotchController(model: self)
     var notchStyle: Bool { config.prompterStyle == "notch" }
+    private lazy var styleWatch: AnyCancellable = $config.map(\.prompterStyle).removeDuplicates().dropFirst()
+        .receive(on: RunLoop.main).sink { [weak self] _ in self?.applyPrompterStyle() }
+
+    /// The prompter style can change mid-meeting (Settings): move the answer to the notch bar or the panel right away.
+    func applyPrompterStyle() {
+        guard isRecording else { return }
+        if notchStyle {
+            let wasOpen = prompterVisible
+            hidePrompter(); notch.show()
+            if wasOpen && prompterQuestion != nil { notch.showQuestion() }
+        } else {
+            let wasOpen = notch.isVisible && notch.state.mode == .question
+            notch.hide()
+            if wasOpen || !prompterAnswer.isEmpty { showPrompter() }
+        }
+    }
 
     /// Shows the answer UI the user picked: the notch bar (while recording) or the floating prompter.
     func presentAnswer() {
@@ -72,6 +89,7 @@ final class AppModel: ObservableObject {
                 self.liveTitle = (try? Store.load(r.meetingID).title) ?? "Meeting"
                 self.openWindowAction?("live")
                 if self.notchStyle { self.notch.show() }
+                _ = self.styleWatch
                 self.lastSound = Date(); self.silentWarning = false
                 self.timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.tick() }
                 self.prompterStatus = "Listening"

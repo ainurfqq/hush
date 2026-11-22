@@ -40,6 +40,7 @@ struct PrompterView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+          VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Circle().fill(model.isRecording ? Color(red: 1, green: 0.42, blue: 0.44) : Color.gray).frame(width: 8, height: 8)
                 Text(header).font(.system(size: 12)).foregroundStyle(Color.white.opacity(0.72)).lineLimit(1)
@@ -57,11 +58,13 @@ struct PrompterView: View {
                     .font(.system(size: model.prompterAnswer.isEmpty ? 15 : 19, weight: model.prompterAnswer.isEmpty ? .regular : .semibold))
                     .lineSpacing(3)
                     .foregroundStyle(model.prompterAnswer.isEmpty ? Color.white.opacity(0.6) : .white)
-                    .frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(minHeight: 110, maxHeight: .infinity)
-            .layoutPriority(1)
+          }
+          .overlay(WindowDragArea())          // header, question and answer: drag the panel from here
+          .layoutPriority(1)
             let others = model.recentQuestions.compactMap(\.question).filter { $0 != model.prompterQuestion }.suffix(2)
             if !others.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
@@ -101,6 +104,33 @@ struct PrompterView: View {
         guard model.prompterQuestion != nil, let t = model.prompterAskedAt else { return model.isRecording ? "Listening for questions" : "Prompter" }
         return "They asked · \(ago(t))"
     }
+}
+
+/// Lets the user drag the prompter from anywhere that is not a button or slider. SwiftUI text and scroll views
+/// swallow the click, so `isMovableByWindowBackground` alone only worked on the thin title strip.
+struct WindowDragArea: NSViewRepresentable {
+    final class DragView: NSView {
+        override func mouseDown(with event: NSEvent) { window?.performDrag(with: event) }
+        /// The layer sits on top of the answer; hand the scroll wheel to the scroll view underneath.
+        override func scrollWheel(with event: NSEvent) {
+            isHidden = true
+            let under = window?.contentView?.hitTest(event.locationInWindow)
+            isHidden = false
+            (under ?? superview)?.scrollWheel(with: event)
+        }
+        override var mouseDownCanMoveWindow: Bool { true }
+        /// The panel never becomes active, so without this the first click is used up and the drag never starts.
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+        /// An open hand over the panel shows that it can be dragged (works while the panel is not active).
+        override func updateTrackingAreas() {
+            trackingAreas.forEach(removeTrackingArea)
+            addTrackingArea(NSTrackingArea(rect: bounds, options: [.cursorUpdate, .activeAlways, .inVisibleRect], owner: self))
+            super.updateTrackingAreas()
+        }
+        override func cursorUpdate(with event: NSEvent) { NSCursor.openHand.set() }
+    }
+    func makeNSView(context: Context) -> NSView { DragView() }
+    func updateNSView(_ nsView: NSView, context: Context) {}
 }
 
 /// System-wide hotkeys through Carbon (no Accessibility permission needed).
