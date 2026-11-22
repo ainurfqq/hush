@@ -3,7 +3,7 @@ import Foundation
 /// Minimal Model Context Protocol server over stdio (newline-delimited JSON-RPC 2.0).
 /// Read-only: it lists and reads meetings; it never records, deletes or sends anything.
 public final class MCPServer {
-    public static let version = "0.1.3"
+    public static let version = "0.1.4"
     let supportedVersions = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]
 
     public init() {}
