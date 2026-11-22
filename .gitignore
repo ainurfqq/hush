@@ -7,3 +7,4 @@ spikes/
 *.aiff
 .DS_Store
 .swiftpm/
+waitlist/.clasp.json

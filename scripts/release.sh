@@ -4,7 +4,7 @@
 # Usage: scripts/release.sh 0.1.1
 set -euo pipefail
 V="${1:?usage: scripts/release.sh X.Y.Z}"; TAG="v$V"
-REPO="ainurfqq/hush-meetings"; TAP="ainurfqq/homebrew-tap"
+REPO="ainurfqq/hush"; TAP="ainurfqq/homebrew-tap"
 cd "$(dirname "$0")/.."
 [ -z "$(git status --porcelain)" ] || { echo "Commit your changes first." >&2; exit 1; }
 

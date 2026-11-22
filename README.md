@@ -28,7 +28,7 @@ dependency. The welcome guide downloads about 800 MB of speech models, each chec
 Without Homebrew's tap, the one-line installer does the same into `~/Applications`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ainurfqq/hush-meetings/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/ainurfqq/hush/main/install.sh | bash
 ```
 
 ## Use

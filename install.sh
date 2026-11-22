@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Hush installer: builds from source on your Mac and installs to ~/Applications. No Xcode, no Apple account.
 #
-#   curl -fsSL https://raw.githubusercontent.com/ainurfqq/hush-meetings/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/ainurfqq/hush/main/install.sh | bash
 #   (from a clone:  bash install.sh)
 #
 # Options (environment): HUSH_REF=<branch|tag> (default main) · HUSH_SKIP_MODELS=1 · HUSH_SMALL_MODEL=1
 #                        HUSH_APPS_DIR=<dir> (default ~/Applications) · HUSH_BIN_DIR=<dir> (default ~/.local/bin)
 set -euo pipefail
 
-REPO="${HUSH_REPO:-ainurfqq/hush-meetings}"
+REPO="${HUSH_REPO:-ainurfqq/hush}"
 REF="${HUSH_REF:-main}"
 DATA="$HOME/Library/Application Support/Hush"
 APPS="${HUSH_APPS_DIR:-$HOME/Applications}"
