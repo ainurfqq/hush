@@ -784,6 +784,10 @@ struct SettingsView: View {
                     Text("Hush only keeps these languages. Lines it guesses as another language are transcribed again. Javanese is less accurate than Indonesian.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
+                TextField("Names and words", text: $model.config.vocabulary, prompt: Text("e.g. Wulandari, ROXST, SocioAI"), axis: .vertical)
+                    .lineLimit(2...4)
+                Text("Hush spells these the way you write them. Names in your context notes file are added too. With a list, the transcript after the meeting takes longer.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Text("Meetings are stored in \(Paths.meetings.path)").font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
             }
             Section("Consent") {

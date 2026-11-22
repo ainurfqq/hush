@@ -64,6 +64,8 @@ public struct Config: Codable, Equatable {
     public var prompterStyle: String = "notch"
     /// Plain-text file with the user's background (CV, product notes) for the prompter.
     public var contextFile: String = ""
+    /// Names and special words for the speech engine to spell right (comma or line separated).
+    public var vocabulary: String = ""
     public var userName: String = ""
     public var keepAudio: Bool = true
     public var acknowledgedAINotice: Bool = false
@@ -77,7 +79,7 @@ public struct Config: Codable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case provider, prompterProvider, model, prompterModel, openAIBaseURL, claudePath, codexPath, claudeConfigDir, codexHome, asrModel, liveAsrModel, language, languages, storageDir,
-             prompterOpacity, prompterAutoAnswer, prompterStyle, contextFile, userName, keepAudio, acknowledgedAINotice, acknowledgedConsent, setupDone, maskSecrets, lastHiddenCheck
+             prompterOpacity, prompterAutoAnswer, prompterStyle, contextFile, vocabulary, userName, keepAudio, acknowledgedAINotice, acknowledgedConsent, setupDone, maskSecrets, lastHiddenCheck
     }
     /// Tolerant decoding: unknown or missing keys fall back to defaults, so old config files keep working.
     public init(from decoder: Decoder) throws {
@@ -101,6 +103,7 @@ public struct Config: Codable, Equatable {
         prompterAutoAnswer = (try? c.decode(Bool.self, forKey: .prompterAutoAnswer)) ?? d.prompterAutoAnswer
         prompterStyle = (try? c.decode(String.self, forKey: .prompterStyle)) ?? d.prompterStyle
         contextFile = (try? c.decode(String.self, forKey: .contextFile)) ?? d.contextFile
+        vocabulary = (try? c.decode(String.self, forKey: .vocabulary)) ?? d.vocabulary
         userName = (try? c.decode(String.self, forKey: .userName)) ?? d.userName
         keepAudio = (try? c.decode(Bool.self, forKey: .keepAudio)) ?? d.keepAudio
         acknowledgedAINotice = (try? c.decode(Bool.self, forKey: .acknowledgedAINotice)) ?? d.acknowledgedAINotice

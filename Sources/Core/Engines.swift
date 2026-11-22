@@ -111,6 +111,8 @@ public enum Transcriber {
         form.addField("response_format", "verbose_json")
         form.addField("language", language)
         form.addField("temperature", "0")
+        let hint = Keyterms.prompt(config)
+        if !hint.isEmpty { form.addField("prompt", hint) }
         var req = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/inference")!)
         req.httpMethod = "POST"; req.timeoutInterval = 300
         req.setValue(form.contentType, forHTTPHeaderField: "Content-Type")
@@ -123,7 +125,8 @@ public enum Transcriber {
         let noSpeech = segs.compactMap { $0["no_speech_prob"] as? Double }.max() ?? 0
         let lps = segs.compactMap { $0["avg_logprob"] as? Double }
         let avgLogprob = lps.isEmpty ? 0 : lps.reduce(0, +) / Double(lps.count)
-        let text = cleanText((j["text"] as? String) ?? "")
+        var text = cleanText((j["text"] as? String) ?? "")
+        if !hint.isEmpty, text.hasPrefix(Keyterms.lead) { text = "" }     // on silence whisper can echo its prompt
         let lang = (j["detected_language"] as? String) ?? (j["language"] as? String)
         let words: [TimedWord] = segs.flatMap { seg in
             ((seg["words"] as? [[String: Any]]) ?? []).compactMap { w in

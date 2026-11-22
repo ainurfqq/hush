@@ -87,7 +87,10 @@ public enum Pipeline {
 
         var segments: [Segment] = []
         var langState = SpeakerLanguages()
-        let windows = ProcessInfo.processInfo.environment["HUSH_NO_BATCH"] == "1"
+        // A word list (Keyterms) makes whisper's word timings too loose to split a joined window back into turns,
+        // so with one, every turn gets its own call: slower, but names right and words stay with their speaker.
+        let noBatch = ProcessInfo.processInfo.environment["HUSH_NO_BATCH"] == "1" || !Keyterms.prompt(config).isEmpty
+        let windows = noBatch
             ? units.indices.map { [$0] } : batch(units.map { ($0.src.path, $0.spk, $0.end - $0.start) })
         for (wi, w) in windows.enumerated() {
             progress("Transcribing \(wi + 1)/\(windows.count)", 0.25 + 0.7 * Double(wi) / Double(max(windows.count, 1)))

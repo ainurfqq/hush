@@ -393,6 +393,17 @@ test("MCP server: initialize, tools/list, tools/call, errors, notifications") {
     expect(((call("not json")?["error"] as? [String: Any])?["code"] as? Int) == -32700, "parse error")
 }
 
+test("Keyterms: word list first, then names from notes, common words skipped, capped") {
+    let notes = "Kita meeting dengan Bu Wulandari dari Megatekwood. The plan uses Meta Business Suite and Q4 2026 numbers. Saya siap."
+    let p = Keyterms.build(vocabulary: "ROXST, SocioAI\nROXST", notes: notes)
+    expect(p.hasPrefix(Keyterms.lead + " ROXST, SocioAI, "), p)
+    for t in ["Bu Wulandari", "Megatekwood", "Meta Business Suite", "Q4"] { expect(p.contains(t), "has \(t): \(p)") }
+    for t in ["Kita", "The", "Saya"] { expect(!p.contains(t + ","), "skips \(t): \(p)") }
+    expect(Keyterms.build(vocabulary: "", notes: "") == "", "empty without input")
+    let long = Keyterms.build(vocabulary: (1...200).map { "Name\($0)" }.joined(separator: ","), notes: "")
+    expect(long.count <= Keyterms.maxChars + Keyterms.lead.count + 2, "capped: \(long.count)")
+}
+
 print("\n\(passed) passed, \(failed.count) failed")
 for f in failed { print("  ✗ \(f)") }
 try? FileManager.default.removeItem(at: home)
