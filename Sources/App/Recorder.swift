@@ -4,7 +4,7 @@ import Foundation
 struct LiveLine: Identifiable, Equatable {
     let id = UUID()
     var t: Double
-    var who: String   // "me" or "them"
+    var who: String   // "me", "them", or "room" (in-room mode: one mic, everyone)
     var text: String
     var question: String? = nil
     var heardAt = Date()
@@ -25,6 +25,8 @@ final class Recorder {
     private let q = DispatchQueue(label: "hush.recorder")
     private let asrQ = DispatchQueue(label: "hush.live-asr")
     private(set) var started = Date()
+    /// The disk is full (or the file broke): the audio so far is safe, but nothing new is saved.
+    var writeFailed: Bool { micWriter?.failed == true || sysWriter?.failed == true }
 
     var onLine: ((LiveLine) -> Void)?
     var onLevels: ((Float, Float) -> Void)?   // mic, system (RMS of last buffer)
@@ -64,7 +66,7 @@ final class Recorder {
             guard var ds = micDS else { return }
             let x = ds.process(s); micDS = ds
             micWriter?.append(x); micLevel = WAV.rms(x[...])
-            for (t, chunk) in micChunker.push(x) { transcribe(chunk, at: t, who: "me") }
+            for (t, chunk) in micChunker.push(x) { transcribe(chunk, at: t, who: mode == .room ? "room" : "me") }
         }
         onLevels?(micLevel, sysLevel)
     }
@@ -77,11 +79,11 @@ final class Recorder {
     private var asrBusy = false
 
     private func transcribe(_ chunk: [Float], at t: Double, who: String) {
-        let gate: Float = who == "me" ? 0.015 : 0.006       // the mic hears room noise; be stricter
+        let gate: Float = who != "them" ? 0.015 : 0.006       // the mic ("me" or "room") hears room noise; be stricter
         guard WAV.rms(chunk[...]) > gate else { return }
         waiting.append((t, who, chunk))
-        let mine = waiting.filter { $0.who == "me" }
-        if mine.count > 3, let oldest = waiting.firstIndex(where: { $0.who == "me" }) {
+        let mine = waiting.filter { $0.who != "them" }
+        if mine.count > 3, let oldest = waiting.firstIndex(where: { $0.who != "them" }) {
             waiting.remove(at: oldest); Log.write("live ASR busy: skipped an old mic chunk")
         }
         pump()
@@ -90,7 +92,7 @@ final class Recorder {
     /// Runs on `q`.
     private func pump() {
         guard !asrBusy, !waiting.isEmpty else { return }
-        let who = waiting.contains { $0.who == "them" } ? "them" : "me"
+        let who = waiting.contains { $0.who == "them" } ? "them" : waiting[0].who   // "me", or "room" in in-room mode
         var t0 = -1.0, joined: [Float] = []
         let gap = [Float](repeating: 0, count: 4800)       // 0.3 s between joined chunks
         while let i = waiting.firstIndex(where: { $0.who == who }), Double(joined.count + waiting[i].samples.count) / 16000 <= 25 || joined.isEmpty {

@@ -7,11 +7,15 @@ final class AppModel: ObservableObject {
     @Published var config = Config.load()
     @Published var meetings: [Meeting] = Store.all()
     @Published var isRecording = false
-    @Published var recordingMode: Recorder.Mode = .call
+    /// Remembered across launches, so the mode on screen is the mode the last meeting used.
+    @Published var recordingMode: Recorder.Mode = Recorder.Mode(rawValue: UserDefaults.standard.string(forKey: "recordingMode") ?? "") ?? .call {
+        didSet { UserDefaults.standard.set(recordingMode.rawValue, forKey: "recordingMode") }
+    }
     @Published var liveLines: [LiveLine] = []
     @Published var micLevel: Float = 0
     @Published var sysLevel: Float = 0
     @Published var silentWarning = false
+    @Published var callSilentWarning = false   // online call, mic hears you, but the call audio is silent (permission off?)
     @Published var busy: [String: String] = [:]          // meeting id → progress text
     @Published var prompterVisible = false
     @Published var prompterQuestion: String?
@@ -67,7 +71,9 @@ final class AppModel: ObservableObject {
     private var answering = false
     private var timer: Timer?
     private var lastSound = Date()
+    private var lastCallSound = Date()
     let answerQ = DispatchQueue(label: "hush.answer")
+    static let pipelineQ = DispatchQueue(label: "hush.pipeline", qos: .userInitiated)
 
     // MARK: recording
 
@@ -77,9 +83,11 @@ final class AppModel: ObservableObject {
         guard !isRecording else { return }
         MicCapture.requestAccess { ok in
             guard ok else { self.lastError = "Microphone access is off. Turn it on in System Settings → Privacy & Security → Microphone."; return }
+            var made: Recorder?
             do {
                 let f = DateFormatter(); f.dateFormat = "d MMM HH:mm"
                 let r = try Recorder(mode: mode, title: title ?? "Meeting \(f.string(from: Date()))")
+                made = r
                 r.onLine = { [weak self] line in DispatchQueue.main.async { self?.addLive(line) } }
                 r.onLevels = { [weak self] m, s in DispatchQueue.main.async { self?.levels(m, s) } }
                 try r.start()
@@ -91,11 +99,15 @@ final class AppModel: ObservableObject {
                 if self.notchStyle { self.notch.show() }
                 _ = self.styleWatch
                 self.lastSound = Date(); self.silentWarning = false
+                self.lastCallSound = Date(); self.callSilentWarning = false
                 self.timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.tick() }
                 self.prompterStatus = "Listening"
                 self.reload()
             } catch {
+                if let r = made { try? Store.delete(r.meetingID); self.reload() }   // no empty "recording" left in the Library
+                Log.write("start recording failed: \(error)")
                 self.lastError = "\(error)"
+                self.openWindowAction?("library")
             }
         }
     }
@@ -104,7 +116,7 @@ final class AppModel: ObservableObject {
         guard let r = recorder else { return }
         timer?.invalidate(); timer = nil
         isRecording = false; recorder = nil
-        notch.hide()
+        notch.hide(); hidePrompter()
         prompterStatus = "Processing last meeting"
         var m = r.stop()
         if var mm = m {
@@ -118,13 +130,20 @@ final class AppModel: ObservableObject {
 
     private func tick() {
         guard let r = recorder else { return }
+        if r.writeFailed {
+            stopRecording()
+            lastError = "Your Mac's disk is full, so Hush stopped recording. The audio up to now is saved. Free some space, then open the meeting and click Transcribe."
+            return
+        }
         elapsed = Date().timeIntervalSince(r.started)
         silentWarning = Date().timeIntervalSince(lastSound) > 30
+        callSilentWarning = recordingMode == .call && !silentWarning && elapsed > 45 && Date().timeIntervalSince(lastCallSound) > 45
     }
 
     private func levels(_ m: Float, _ s: Float) {
         micLevel = m; sysLevel = s
         if max(m, s) > 0.01 { lastSound = Date() }
+        if s > 0.002 { lastCallSound = Date() }
     }
 
     // MARK: live transcript + prompter
@@ -135,7 +154,7 @@ final class AppModel: ObservableObject {
         liveLines.append(line)
         if let s0 = simStart { print(String(format: "LINE_AT %.2f (audio clock) chunk@%.1f: %@", Date().timeIntervalSince(s0), line.t, line.text)); fflush(stdout) }
         if liveLines.count > 400 { liveLines.removeFirst(100) }
-        recorder?.liveLog("\(line.who == "me" ? "Me" : "Them"): \(line.text)")
+        recorder?.liveLog("\(line.who == "me" ? "Me" : line.who == "room" ? "Room" : "Them"): \(line.text)")
         guard line.who != "me", config.prompterAutoAnswer,
               (config.prompterProvider ?? config.provider) != .none || !notesText.isEmpty,
               var q = line.question else { return }
@@ -349,19 +368,24 @@ final class AppModel: ObservableObject {
     func reload() { meetings = Store.all() }
 
     func process(_ id: String) {
+        guard busy[id] == nil else { return }   // one pipeline per meeting
         busy[id] = "Starting…"
         let cfg = config
-        DispatchQueue.global(qos: .userInitiated).async {
+        // One meeting at a time: two pipelines at once can run an 8 GB Mac out of memory.
+        Self.pipelineQ.async {
             do {
                 var m = try Pipeline.process(id, config: cfg) { s, f in
                     DispatchQueue.main.async { self.busy[id] = "\(s) (\(Int(f * 100))%)" }
                 }
                 DispatchQueue.main.async { self.busy[id] = "Summarizing…" }
                 let (s, title) = try Summarizer.summarize(m, provider: AI.provider(cfg))
-                m.summary = s
-                if let title, m.title.hasPrefix("Meeting ") || m.source == "import" { m.title = title }
-                try Store.save(m)
+                // Re-read: names, notes or a title typed while the summary was written must not be lost.
+                var cur = (try? Store.load(id)) ?? m
+                cur.summary = s
+                if let title, cur.title.hasPrefix("Meeting ") || cur.source == "import" { cur.title = title }
+                try Store.save(cur)
             } catch {
+                Log.write("process/summary failed for \(id): \(error)")
                 DispatchQueue.main.async { self.lastError = "\(error)" }
             }
             DispatchQueue.main.async {
@@ -376,12 +400,15 @@ final class AppModel: ObservableObject {
     }
 
     func summarize(_ id: String) {
-        guard var m = try? Store.load(id) else { return }
+        guard busy[id] == nil, let m = try? Store.load(id) else { return }
         busy[id] = "Summarizing…"
         let cfg = config
         DispatchQueue.global().async {
-            do { let (s, _) = try Summarizer.summarize(m, provider: AI.provider(cfg)); m.summary = s; try Store.save(m) }
-            catch { DispatchQueue.main.async { self.lastError = "\(error)" } }
+            do {
+                let (s, _) = try Summarizer.summarize(m, provider: AI.provider(cfg))
+                var cur = (try? Store.load(id)) ?? m; cur.summary = s; try Store.save(cur)
+            }
+            catch { Log.write("summary failed for \(id): \(error)"); DispatchQueue.main.async { self.lastError = "\(error)" } }
             DispatchQueue.main.async { self.busy[id] = nil; self.reload() }
         }
     }

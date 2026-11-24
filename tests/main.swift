@@ -394,14 +394,24 @@ test("MCP server: initialize, tools/list, tools/call, errors, notifications") {
 }
 
 test("Keyterms: word list first, then names from notes, common words skipped, capped") {
-    let notes = "Kita meeting dengan Bu Wulandari dari Megatekwood. The plan uses Meta Business Suite and Q4 2026 numbers. Saya siap."
-    let p = Keyterms.build(vocabulary: "ROXST, SocioAI\nROXST", notes: notes)
-    expect(p.hasPrefix(Keyterms.lead + " ROXST, SocioAI, "), p)
-    for t in ["Bu Wulandari", "Megatekwood", "Meta Business Suite", "Q4"] { expect(p.contains(t), "has \(t): \(p)") }
+    let notes = "Kita meeting dengan Bu Kartika dari Tokobaru. The plan uses Meta Business Suite and Q4 2026 numbers. Saya siap."
+    let p = Keyterms.build(vocabulary: "Acme, Lumio\nAcme", notes: notes)
+    expect(p.hasPrefix(Keyterms.lead + " Acme, Lumio, "), p)
+    for t in ["Bu Kartika", "Tokobaru", "Meta Business Suite", "Q4"] { expect(p.contains(t), "has \(t): \(p)") }
     for t in ["Kita", "The", "Saya"] { expect(!p.contains(t + ","), "skips \(t): \(p)") }
     expect(Keyterms.build(vocabulary: "", notes: "") == "", "empty without input")
     let long = Keyterms.build(vocabulary: (1...200).map { "Name\($0)" }.joined(separator: ","), notes: "")
     expect(long.count <= Keyterms.maxChars + Keyterms.lead.count + 2, "capped: \(long.count)")
+}
+
+test("Speech regions without the speaker engine: two bursts with a long pause become two turns") {
+    var s = [Float](repeating: 0.0005, count: 16000 * 6)
+    for i in 16000..<32000 { s[i] = 0.1 * sin(Float(i) * 0.05) }          // 1.0-2.0 s
+    for i in 64000..<80000 { s[i] = 0.1 * sin(Float(i) * 0.05) }          // 4.0-5.0 s
+    let r = Pipeline.speechRegions(s)
+    expect(r.count == 2, "\(r)")
+    expect(abs((r.first?.start ?? 0) - 1.0) < 0.15 && abs((r.last?.end ?? 0) - 5.0) < 0.15, "\(r)")
+    expect(Pipeline.speechRegions([Float](repeating: 0, count: 16000)).isEmpty, "silence → none")
 }
 
 print("\n\(passed) passed, \(failed.count) failed")

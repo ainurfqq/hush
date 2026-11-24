@@ -8,6 +8,7 @@ struct MenuContent: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.openWindow) var openWindow
     @ObservedObject var flash = MenuRowFlash.shared
+    @ObservedObject var setup = SetupState.shared
     var copied: Bool { flash.on }
 
     var body: some View {
@@ -41,7 +42,7 @@ struct MenuContent: View {
         .frame(width: 340)
         .background(Theme.panel)
         .tint(Theme.indigo)
-        .onAppear { model.openWindowAction = { id in openWindow(id: id); NSApp.activate(ignoringOtherApps: true) } }
+        .onAppear { model.openWindowAction = { id in openWindow(id: id); NSApp.activate(ignoringOtherApps: true) }; setup.refresh() }
     }
 
     func open(_ id: String) { openWindow(id: id); NSApp.activate(ignoringOtherApps: true) }
@@ -66,6 +67,7 @@ struct MenuContent: View {
         Text(model.recordingMode == .call ? "Hears your mic as \"Me\" and the call as everyone else. No bot joins."
                                           : "Uses the mic only and tells the voices in the room apart.")
             .font(.system(size: 12)).foregroundStyle(Theme.ink3).fixedSize(horizontal: false, vertical: true)
+        if !setup.engines { enginesWarning }
         Button { model.startRecording(mode: model.recordingMode) } label: {
             HStack(spacing: 8) { Circle().fill(.white).frame(width: 10, height: 10); Text("Start recording"); Text("⌃⌥R").opacity(0.8).font(.system(size: 12)) }
                 .frame(maxWidth: .infinity, minHeight: 40)
@@ -103,6 +105,22 @@ struct MenuContent: View {
         }
     }
 
+    /// Shown when the first download did not finish: recordings still work, but speakers are not told apart
+    /// and the notes take longer, so say it before the meeting, not after.
+    @ViewBuilder var enginesWarning: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("The speech files are not fully downloaded.").font(.system(size: 12, weight: .semibold))
+            Text(setup.downloading ? setup.downloadLine
+                 : (setup.downloadLine.isEmpty ? (Engines.check().prefix(2).allSatisfy { $0.1 }
+                    ? "You can record now, but speakers will not be told apart until the download finishes."
+                    : "You can record now. The notes are written after the download finishes.") : setup.downloadLine))
+                .font(.system(size: 12)).foregroundStyle(Theme.ink3).fixedSize(horizontal: false, vertical: true).lineLimit(3)
+            if !setup.downloading { Button("Finish the download") { setup.downloadModels() }.buttonStyle(LinkStyle()).font(.system(size: 12)) }
+        }
+        .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.chip, in: RoundedRectangle(cornerRadius: 9))
+    }
+
     @ViewBuilder var hiddenStatus: some View {
         let parts = model.config.lastHiddenCheck.split(separator: "|").map(String.init)
         if model.needsScreenPermission {
@@ -133,11 +151,19 @@ struct MenuContent: View {
             Pill(text: model.recordingMode == .call ? "Online call" : "In the room")
         }
         VStack(alignment: .leading, spacing: 6) {
-            LevelRow(label: "You", level: model.micLevel)
+            LevelRow(label: model.recordingMode == .room ? "Room" : "You", level: model.micLevel)
             if model.recordingMode == .call { LevelRow(label: "Call audio", level: model.sysLevel) }
             if model.silentWarning {
                 Label("Hush hears nothing for 30 s. Check the mic and the call audio.", systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange).font(.caption)
+            } else if model.callSilentWarning {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Hush hears you, but not the call. Is \"Screen & System Audio Recording\" on for Hush?", systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange).font(.caption).fixedSize(horizontal: false, vertical: true)
+                    Button("Open System Settings") {
+                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
+                    }.buttonStyle(LinkStyle()).font(.caption)
+                }
             } else {
                 Text("Hearing you\(model.recordingMode == .call ? " and the call" : "")").font(.system(size: 12)).foregroundStyle(Theme.ok)
             }
@@ -292,7 +318,7 @@ struct LiveWindow: View {
                     }
                     ForEach(model.liveLines) { l in
                         HStack(alignment: .top, spacing: 12) {
-                            Text(l.who == "me" ? "You" : "Them").font(.system(size: 13, weight: .semibold))
+                            Text(l.who == "me" ? "You" : l.who == "room" ? "Room" : "Them").font(.system(size: 13, weight: .semibold))
                                 .foregroundStyle(l.who == "me" ? Theme.ink : Theme.rgb(0x7A3E06)).frame(width: 52, alignment: .leading)
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(l.text).font(.system(size: 15)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
@@ -485,7 +511,34 @@ struct LibraryView: View {
 final class DetailState: ObservableObject {
     @Published var meeting: Meeting
     @Published var tab = 0
-    init(_ m: Meeting) { meeting = m }
+    private var base: Meeting          // the copy last read from disk: tells which fields the user changed
+    init(_ m: Meeting) { meeting = m; base = m }
+
+    /// Typed edits (title, my notes, speaker names) are saved on their own, a moment after typing stops,
+    /// so they survive switching meetings or quitting. Only those fields are written, onto a fresh copy from disk,
+    /// so a transcript that finished in the meantime is never overwritten.
+    private var saveWork: DispatchWorkItem?
+    func scheduleSave() {
+        saveWork?.cancel()
+        let w = DispatchWorkItem { [weak self] in self?.saveEdits() }
+        saveWork = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: w)
+    }
+    func saveEdits() {
+        saveWork?.cancel()
+        guard var cur = try? Store.load(meeting.id) else { return }
+        var changed = false
+        if meeting.title != base.title { cur.title = meeting.title; changed = true }
+        if meeting.userNotes != base.userNotes { cur.userNotes = meeting.userNotes; changed = true }
+        if meeting.speakerNames != base.speakerNames { cur.speakerNames = meeting.speakerNames; changed = true }
+        if changed { try? Store.save(cur) }
+        base.title = meeting.title; base.userNotes = meeting.userNotes; base.speakerNames = meeting.speakerNames
+    }
+    /// A newer copy arrived (processing finished, reload): keep pending edits, then show what is on disk.
+    func refresh() {
+        saveEdits()
+        if let d = try? Store.load(meeting.id) { meeting = d; base = d }
+    }
 }
 
 struct MeetingDetail: View {
@@ -499,7 +552,7 @@ struct MeetingDetail: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .top) {
                     TextField("Title", text: $st.meeting.title, axis: .vertical)
-                        .lineLimit(1...3).onSubmit { model.save(meeting) }
+                        .lineLimit(1...3).onSubmit { st.saveEdits(); model.reload() }
                         .textFieldStyle(.plain).font(Theme.serif(32))
                         .frame(maxWidth: .infinity, alignment: .leading)
                     if let b = model.busy[meeting.id] { ProgressView().controlSize(.small); Text(b).font(.caption).foregroundStyle(Theme.ink3) }
@@ -508,8 +561,8 @@ struct MeetingDetail: View {
                     }.buttonStyle(OutlineButton()).frame(height: 32)
                     Menu {
                         Button("Export Markdown…") { model.export(meeting) }
-                        Button("Transcribe again") { model.process(meeting.id) }
-                        Button("Summarize again with \(model.config.provider.label)") { model.summarize(meeting.id) }
+                        Button("Transcribe again") { model.process(meeting.id) }.disabled(model.busy[meeting.id] != nil)
+                        Button("Summarize again with \(model.config.provider.label)") { model.summarize(meeting.id) }.disabled(model.busy[meeting.id] != nil)
                         Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([Store.folder(meeting.id)]) }
                         Divider()
                         Button("Delete meeting", role: .destructive) { model.delete(meeting.id) }
@@ -551,7 +604,11 @@ struct MeetingDetail: View {
                 }.padding(.horizontal, 32).padding(.vertical, 22).frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .onChange(of: model.meetings) { ms in if let fresh = ms.first(where: { $0.id == st.meeting.id }) { st.meeting = fresh } }
+        .onChange(of: model.meetings) { ms in if let fresh = ms.first(where: { $0.id == st.meeting.id }) { _ = fresh; st.refresh() } }
+        .onChange(of: st.meeting.title) { _ in st.scheduleSave() }
+        .onChange(of: st.meeting.userNotes) { _ in st.scheduleSave() }
+        .onChange(of: st.meeting.speakerNames) { _ in st.scheduleSave() }
+        .onDisappear { st.saveEdits() }
     }
 
     var meta: String {
@@ -570,6 +627,8 @@ struct MeetingDetail: View {
             Text(s.summary).font(.system(size: 15)).lineSpacing(4).textSelection(.enabled)
             if !s.decisions.isEmpty { heading("Decisions"); ForEach(s.decisions, id: \.self) { Text("• \($0)").font(.system(size: 14)).textSelection(.enabled) } }
             if !s.openQuestions.isEmpty { heading("Open questions"); ForEach(s.openQuestions, id: \.self) { Text("• \($0)").font(.system(size: 14)).textSelection(.enabled) } }
+        } else if let b = model.busy[meeting.id] {
+            Text("Making the notes: \(b)").foregroundStyle(Theme.ink3)
         } else if meeting.segments.isEmpty {
             Text(meeting.status == .failed ? "Processing failed: \(meeting.error ?? "")" : "Not transcribed yet.").foregroundStyle(Theme.ink3)
             Button("Transcribe now") { model.process(meeting.id) }.buttonStyle(OutlineButton()).frame(width: 160, height: 34)
@@ -578,7 +637,25 @@ struct MeetingDetail: View {
         }
     }
 
+    /// The live captions saved during the call (live.md): shown when there is no full transcript yet, or processing failed.
+    var liveLog: String? {
+        let url = Store.folder(meeting.id).appendingPathComponent("live.md")
+        guard let t = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        let body = t.replacingOccurrences(of: "# Live log\n\n", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return body.isEmpty ? nil : body
+    }
+
     @ViewBuilder var transcriptTab: some View {
+        if meeting.segments.isEmpty, let live = liveLog {
+            Text(meeting.status == .failed
+                 ? "The full transcript failed, so these are the live captions from the call. They are rougher, but nothing is lost."
+                 : "Live captions from the call. The full transcript replaces them after processing.")
+                .font(.system(size: 13)).foregroundStyle(Theme.ink3)
+            if meeting.status == .failed && model.busy[meeting.id] == nil {
+                Button("Transcribe again") { model.process(meeting.id) }.buttonStyle(OutlineButton()).frame(width: 160, height: 34)
+            }
+            Text(live).font(.system(size: 14)).lineSpacing(3).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+        }
         ForEach(Array(meeting.segments.enumerated()), id: \.offset) { _, s in
             HStack(alignment: .top, spacing: 12) {
                 Text(formatTime(s.start)).font(.system(size: 12).monospacedDigit()).foregroundStyle(Theme.ink3).frame(width: 46, alignment: .leading)
@@ -593,7 +670,13 @@ struct MeetingDetail: View {
         if items.isEmpty { Text("No tasks found.").foregroundStyle(Theme.ink3) }
         ForEach(Array(items.enumerated()), id: \.offset) { i, a in
             HStack(alignment: .top, spacing: 12) {
-                Toggle("", isOn: Binding(get: { a.done }, set: { v in st.meeting.summary?.actionItems[i].done = v; model.save(st.meeting) }))
+                Toggle("", isOn: Binding(get: { a.done }, set: { v in
+                    st.meeting.summary?.actionItems[i].done = v
+                    if var cur = try? Store.load(meeting.id), cur.summary?.actionItems.indices.contains(i) == true {
+                        cur.summary?.actionItems[i].done = v; try? Store.save(cur)
+                    }
+                    model.reload()
+                }))
                     .toggleStyle(.checkbox).labelsHidden()
                 VStack(alignment: .leading, spacing: 6) {
                     Text(a.task).font(.system(size: 14)).strikethrough(a.done).fixedSize(horizontal: false, vertical: true)
@@ -620,20 +703,28 @@ struct MeetingDetail: View {
         TextEditor(text: Binding(get: { st.meeting.userNotes ?? "" }, set: { st.meeting.userNotes = $0 }))
             .font(.system(size: 14)).scrollContentBackground(.hidden).frame(minHeight: 220).padding(8)
             .background(Color.white, in: RoundedRectangle(cornerRadius: 10)).overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.line))
-        SaveButton(title: "Save notes", outline: true) { model.save(st.meeting) }.frame(width: 120, height: 32)
+        SaveButton(title: "Save notes", outline: true) { st.saveEdits(); model.reload() }.frame(width: 120, height: 32)
     }
 
     @ViewBuilder var speakersTab: some View {
-        Text("Give speakers real names. The transcript, export and MCP use these names.").font(.system(size: 13)).foregroundStyle(Theme.ink3)
+        if meeting.speakers.isEmpty {
+            Text("Speakers appear here after the full transcript is made. Then you can give each one a real name.")
+                .font(.system(size: 13)).foregroundStyle(Theme.ink3)
+            if model.busy[meeting.id] == nil {
+                Button("Transcribe now") { model.process(meeting.id) }.buttonStyle(OutlineButton()).frame(width: 160, height: 34)
+            }
+        } else {
+        Text("Give speakers real names. The transcript and export use these names. Click Summarize again to use them in the summary too.").font(.system(size: 13)).foregroundStyle(Theme.ink3)
         ForEach(meeting.speakers, id: \.self) { spk in
             HStack {
                 Text(spk == "me" ? "Me" : spk.replacingOccurrences(of: "spk", with: "Speaker ")).frame(width: 90, alignment: .leading)
                 TextField("Name", text: Binding(get: { meeting.speakerNames[spk] ?? "" }, set: { st.meeting.speakerNames[spk] = $0 }),
-                          onCommit: { model.save(meeting) })
+                          onCommit: { st.saveEdits(); model.reload() })
                 Text("\(meeting.segments.filter { $0.speaker == spk }.count) turns").font(.caption).foregroundStyle(Theme.ink3)
             }
         }
-        SaveButton(title: "Save names", outline: true) { model.save(meeting) }.frame(width: 120, height: 32)
+        SaveButton(title: "Save names", outline: true) { st.saveEdits(); model.reload() }.frame(width: 120, height: 32)
+        }
     }
 }
 
@@ -674,7 +765,7 @@ final class SetupState: ObservableObject {
     func refresh() {
         let checks = Engines.check()
         engines = checks.allSatisfy { $0.1 }
-        enginesDetail = engines ? "whisper.cpp + speaker models · checked" : "Missing: " + checks.filter { !$0.1 }.map(\.0).joined(separator: ", ") + ". Run: hush setup"
+        enginesDetail = engines ? "whisper.cpp + speaker models · checked" : "Missing: " + checks.filter { !$0.1 }.map(\.0).joined(separator: ", ") + ". " + Engines.setupHint
         mic = AVCaptureDeviceAuthorized()
         callAudioTried = Store.all().contains { $0.source == "live" }
     }
@@ -784,9 +875,9 @@ struct SettingsView: View {
                     Text("Hush only keeps these languages. Lines it guesses as another language are transcribed again. Javanese is less accurate than Indonesian.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                TextField("Names and words", text: $model.config.vocabulary, prompt: Text("e.g. Wulandari, ROXST, SocioAI"), axis: .vertical)
+                TextField("Names and words", text: $model.config.vocabulary, prompt: Text("e.g. Kartika, Tokobaru, Lumio"), axis: .vertical)
                     .lineLimit(2...4)
-                Text("Hush spells these the way you write them. Names in your context notes file are added too. With a list, the transcript after the meeting takes longer.")
+                Text("Hush spells these the way you write them. With a list, the transcript after the meeting takes longer.")
                     .font(.caption).foregroundStyle(.secondary)
                 Text("Meetings are stored in \(Paths.meetings.path)").font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
             }

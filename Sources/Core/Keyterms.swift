@@ -1,19 +1,14 @@
 import Foundation
 
 /// Names and special words passed to whisper as its starting prompt, so it spells them the way the user does
-/// (Granola does the same with Deepgram "keyterms"). Sources: Settings → Vocabulary, and capitalised names in the
-/// prompter notes file. Kept short: whisper reads at most ~224 prompt tokens, and a long prompt can leak into the text.
+/// (Granola does the same with Deepgram "keyterms"). Source: Settings → Names and words only. Names from the prompter
+/// notes file are not used: a CV or product notes file nearly always has capitals, and any prompt makes the final
+/// transcript one whisper call per turn (several times slower on an 8 GB M1, QA 2026-11-24). Kept short: whisper reads at most ~224 prompt tokens, and a long prompt can leak into the text.
 public enum Keyterms {
     static let maxChars = 400
     public static let lead = "Nama dan istilah:"
 
-    public static func prompt(_ c: Config) -> String {
-        var notes = ""
-        if !c.contextFile.isEmpty {
-            notes = (try? String(contentsOfFile: (c.contextFile as NSString).expandingTildeInPath, encoding: .utf8)) ?? ""
-        }
-        return build(vocabulary: c.vocabulary, notes: String(notes.prefix(6000)))
-    }
+    public static func prompt(_ c: Config) -> String { build(vocabulary: c.vocabulary, notes: "") }
 
     public static func build(vocabulary: String, notes: String) -> String {
         var out: [String] = [], seen = Set<String>(), length = 0

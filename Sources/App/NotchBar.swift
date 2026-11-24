@@ -46,7 +46,8 @@ final class NotchPanel: NSPanel {
         hasShadow = false
         hidesOnDeactivate = false
         sharingType = ProcessInfo.processInfo.environment["HUSH_QA_CAPTURABLE"] == "1" ? .readOnly : .none
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        // No .stationary: that kept the bar on top of Mission Control's Spaces strip, in the way when switching desktops.
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
     }
     override var canBecomeKey: Bool { true }
     override func cancelOperation(_ sender: Any?) { NotchController.current?.collapse(force: true) }   // Esc
@@ -105,11 +106,21 @@ final class NotchController {
         panel.setFrame(NSRect(x: (cx - w / 2).rounded(), y: top - h, width: w, height: h), display: false)
     }
 
+    private var hoverWork: DispatchWorkItem?
     func hoverChanged(_ on: Bool) {
         state.hovering = on
         if on {
             collapseWork?.cancel()
-            if state.mode == .collapsed { state.mode = .hover }
+            // Open only if the pointer rests on the bar: passing through the top edge (menu bar, Spaces) leaves it closed.
+            if state.mode == .collapsed {
+                hoverWork?.cancel()
+                let w = DispatchWorkItem { [weak self] in
+                    guard let self, self.state.hovering, self.state.mode == .collapsed else { return }
+                    self.state.mode = .hover
+                }
+                hoverWork = w
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: w)
+            }
         } else if state.mode == .hover || (state.mode == .question && !state.pinned && autoCloseDue) {
             schedule(after: 0.45)
         }
@@ -219,7 +230,7 @@ struct NotchView: View {
                 Spacer()
             }
             if let l = model.liveLines.last {
-                (Text(l.who == "me" ? "You  " : "Them  ").bold().foregroundColor(Color(red: 0.95, green: 0.76, blue: 0.55))
+                (Text(l.who == "me" ? "You  " : l.who == "room" ? "Room  " : "Them  ").bold().foregroundColor(Color(red: 0.95, green: 0.76, blue: 0.55))
                  + Text(l.text).foregroundColor(.white.opacity(0.85)))
                     .font(.system(size: 13)).lineLimit(2)
             } else {

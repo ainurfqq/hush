@@ -66,6 +66,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         TestHooks.run(Self.model, CommandLine.arguments)
     }
 
+    /// Quitting mid-meeting or while notes are made would stop that work: ask first.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let m = Self.model
+        guard m.isRecording || !m.busy.isEmpty else { return .terminateNow }
+        let a = NSAlert()
+        a.messageText = m.isRecording ? "Hush is recording a meeting." : "Hush is still writing your notes."
+        a.informativeText = m.isRecording ? "If you quit now, the recording stops. Hush finishes the notes the next time it opens."
+                                          : "If you quit now, Hush finishes the notes the next time it opens."
+        a.addButton(withTitle: "Keep Hush open"); a.addButton(withTitle: "Quit")
+        NSApp.activate(ignoringOtherApps: true)
+        return a.runModal() == .alertSecondButtonReturn ? .terminateNow : .terminateCancel
+    }
+
     func applicationWillTerminate(_ n: Notification) {
         if Self.model.isRecording { _ = Self.model.stopRecording() }
         WhisperServer.shared.stop()
@@ -73,11 +86,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// A crash mid-recording leaves status .recording with valid WAVs (headers are rewritten on every write).
     private func recoverInterrupted() {
+        var resume: [String] = []
         for var m in Store.all() where m.status == .recording || m.status == .processing {
             m.status = .recorded; m.error = "Recovered after Hush quit during recording or processing."
-            try? Store.save(m)
+            try? Store.save(m); resume.append(m.id)
         }
         Self.model.reload()
+        // Finish the notes the quit interrupted (QA runs with -- flags keep their own flow).
+        if !CommandLine.arguments.contains(where: { $0.hasPrefix("--") }) { resume.forEach { Self.model.process($0) } }
     }
 }
 

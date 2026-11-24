@@ -15,13 +15,17 @@ public enum Pipeline {
         m.status = .processing; m.error = nil
         try Store.save(m)
         do {
-            m = try run(m, config: config, progress: progress)
-            m.status = .ready
-            try Store.save(m)
-            return m
+            let done = try run(m, config: config, progress: progress)
+            // Re-read: a title, notes or speaker names edited while this ran must not be overwritten.
+            var cur = (try? Store.load(meetingID)) ?? done
+            cur.segments = done.segments; cur.duration = done.duration
+            cur.status = .ready; cur.error = nil
+            try Store.save(cur)
+            return cur
         } catch {
-            m.status = .failed; m.error = "\(error)"
-            try? Store.save(m)
+            Log.write("processing failed for \(meetingID): \(error)")
+            // Fresh copy: keep edits made meanwhile, and do not bring back a meeting deleted while this ran.
+            if var cur = try? Store.load(meetingID) { cur.status = .failed; cur.error = "\(error)"; try? Store.save(cur) }
             throw error
         }
     }
@@ -33,27 +37,30 @@ public enum Pipeline {
         let mic = dir.appendingPathComponent("mic.wav"), sys = dir.appendingPathComponent("system.wav")
         let single = dir.appendingPathComponent("audio.wav")
         var turns: [(DiarTurn, URL, String)] = []   // turn, source file, speaker id
+        fellBack = false
 
         let hasSys = fm.fileExists(atPath: sys.path) && WAV.duration(sys) > 1 && hasSignal(sys)
         let hasMic = fm.fileExists(atPath: mic.path) && WAV.duration(mic) > 1
 
+        WhisperServer.shared.pinned = true
+        defer { WhisperServer.shared.pinned = false }
         // Warm the ASR server while diarization runs (both are needed; this hides the ~5-10 s model load).
         DispatchQueue.global().async { _ = try? WhisperServer.shared.ensureRunning(config: config) }
 
         if hasSys {
             progress("Finding speakers in call audio", 0.05)
-            let d = try Diarizer.run(sys)
+            let d = try speakerTurns(sys)
             turns += relabel(d).map { ($0, sys, $0.label) }
             if hasMic && hasSignal(mic) {
                 progress("Finding your speech in mic audio", 0.2)
-                let me = try Diarizer.run(mic, speakers: 1)
+                let me = try speakerTurns(mic, speakers: 1)
                 turns += me.map { ($0, mic, "me") }
             }
         } else {
             let src = fm.fileExists(atPath: single.path) ? single : mic
             guard fm.fileExists(atPath: src.path) else { throw HushError.badAudio("no audio in \(dir.path)") }
             progress("Finding speakers", 0.05)
-            let d = try Diarizer.run(src)
+            let d = try speakerTurns(src)
             turns += relabel(d).map { ($0, src, $0.label) }
         }
 
@@ -87,9 +94,11 @@ public enum Pipeline {
 
         var segments: [Segment] = []
         var langState = SpeakerLanguages()
+        langState.lockOff = fellBack
         // A word list (Keyterms) makes whisper's word timings too loose to split a joined window back into turns,
         // so with one, every turn gets its own call: slower, but names right and words stay with their speaker.
         let noBatch = ProcessInfo.processInfo.environment["HUSH_NO_BATCH"] == "1" || !Keyterms.prompt(config).isEmpty
+            || fellBack   // one "speaker" may mix languages: a joined window would get one language and translate the rest
         let windows = noBatch
             ? units.indices.map { [$0] } : batch(units.map { ($0.src.path, $0.spk, $0.end - $0.start) })
         for (wi, w) in windows.enumerated() {
@@ -158,9 +167,10 @@ public enum Pipeline {
     public struct SpeakerLanguages {
         var seen: [String: [String]] = [:]
         var locked: [String: String] = [:]
+        public var lockOff = false
         public init() {}
         public func language(for spk: String, configured: String) -> String {
-            configured != "auto" ? configured : (locked[spk] ?? "auto")
+            configured != "auto" ? configured : (lockOff ? "auto" : (locked[spk] ?? "auto"))
         }
         public mutating func record(_ spk: String, _ lang: String?) {
             guard let lang else { return }
@@ -183,6 +193,37 @@ public enum Pipeline {
     }
 
     /// speaker_00 → spk1 in order of first appearance.
+    /// Speaker turns for one file. If the speaker engines are missing (download not finished) or fail,
+    /// the file becomes one speaker cut at pauses, so the meeting still gets a transcript instead of failing.
+    /// Set when a file fell back to one speaker: that "speaker" may be several people in several languages,
+    /// so the per-speaker language lock must stay off (it would translate the English turns into Indonesian).
+    static var fellBack = false
+    static func speakerTurns(_ wav: URL, speakers: Int = 0) throws -> [DiarTurn] {
+        do { return try Diarizer.run(wav, speakers: speakers) }
+        catch {
+            fellBack = true
+            Log.write("speaker engine failed for \(wav.lastPathComponent), using one speaker: \(error)")
+            return speechRegions(try WAV.read(wav).samples)
+        }
+    }
+
+    /// Speech regions by loudness, in 100 ms frames: louder than 3× the noise floor, gaps under 0.8 s joined.
+    public static func speechRegions(_ s: [Float], rate: Int = 16000) -> [DiarTurn] {
+        let n = rate / 10
+        guard s.count >= n else { return [] }
+        let rms = stride(from: 0, to: s.count - n + 1, by: n).map { WAV.rms(s[$0..<$0 + n]) }
+        let floor = rms.sorted()[rms.count / 5]
+        let on = max(0.004, floor * 3)
+        var out: [DiarTurn] = [], start: Int? = nil, last = 0
+        for (i, r) in rms.enumerated() where r > on {
+            if let st = start, i - last > 8 { out.append(DiarTurn(start: Double(st) / 10, end: Double(last + 1) / 10, label: "speaker_00")); start = i }
+            if start == nil { start = i }
+            last = i
+        }
+        if let st = start { out.append(DiarTurn(start: Double(st) / 10, end: Double(last + 1) / 10, label: "speaker_00")) }
+        return out.filter { $0.end - $0.start >= 0.4 }
+    }
+
     public static func relabel(_ turns: [DiarTurn]) -> [DiarTurn] {
         var map: [String: String] = [:]
         return turns.sorted { $0.start < $1.start }.map { t in

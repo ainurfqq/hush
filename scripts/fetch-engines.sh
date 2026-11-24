@@ -16,24 +16,30 @@ if [ ! -x "$BUNDLED" ] && ! command -v whisper-server >/dev/null 2>&1 && [ ! -x 
   else echo "Homebrew is needed for whisper.cpp: https://brew.sh then run: brew install whisper-cpp" >&2; exit 1; fi
 fi
 
-grep -v '^#' "$LOCK" | while IFS='|' read -r kind rel url want; do
+# One failed file must not block the others: note it, carry on, and exit non-zero at the end.
+FAILED=()
+while IFS='|' read -r kind rel url want; do
   [ -z "$kind" ] && continue
   [ "$kind" = "model-optional" ] && [ "${HUSH_SMALL_MODEL:-0}" != "1" ] && continue
-  dst="$BASE/$rel"
-  if [ -f "$dst" ] && [ "$(sha "$dst")" = "$want" ]; then say "ok   $(basename "$rel")"
+  dst="$BASE/$rel"; name="$(basename "$rel")"
+  if [ -f "$dst" ] && [ "$(sha "$dst")" = "$want" ]; then say "ok   $name"
   else
-    name="$(basename "$rel")"
     if [ -n "${HUSH_LOCAL_CACHE:-}" ] && [ -f "$(find "$HUSH_LOCAL_CACHE" -name "$name" -print -quit)" ]; then
       cp "$(find "$HUSH_LOCAL_CACHE" -name "$name" -print -quit)" "$dst.part"
     else
-      say "get  $name"; curl -fL --retry 3 --progress-bar -o "$dst.part" "$url"
+      # -C - resumes a .part left by a stalled or stopped download instead of starting a big file again.
+      say "get  $name"
+      if ! curl -fL -C - --retry 3 --speed-limit 1024 --speed-time 30 --progress-bar -o "$dst.part" "$url"; then
+        echo "download failed: $name" >&2; FAILED+=("$name"); continue
+      fi
     fi
     got="$(sha "$dst.part")"
-    if [ "$got" != "$want" ]; then rm -f "$dst.part"; echo "SHA-256 mismatch for $name (got $got)" >&2; exit 1; fi
+    if [ "$got" != "$want" ]; then rm -f "$dst.part"; echo "SHA-256 mismatch for $name (got $got)" >&2; FAILED+=("$name"); continue; fi
     mv "$dst.part" "$dst"; say "ok   $name (verified)"
   fi
-  if [ "$kind" = "tarball" ]; then tar -xjf "$dst" -C "$(dirname "$dst")"; fi
-done
+  if [ "$kind" = "tarball" ]; then tar -xjf "$dst" -C "$(dirname "$dst")" || FAILED+=("$name (unpack)"); fi
+done < <(grep -v '^#' "$LOCK")
 # The prebuilt sherpa-onnx binary comes from a downloaded tarball; clear quarantine in case a browser set it.
 xattr -dr com.apple.quarantine "$BASE/engines" 2>/dev/null || true
+if [ ${#FAILED[@]} -gt 0 ]; then echo "Not finished: ${FAILED[*]}. Check the internet connection and try again." >&2; exit 1; fi
 say "engines ready in $BASE"

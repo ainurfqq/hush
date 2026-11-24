@@ -18,13 +18,15 @@ final class Updater: NSObject, SPUUpdaterDelegate {
     func start() { _ = controller }
     func checkNow() { controller.checkForUpdates(nil) }
 
-    /// Never quit for an update in the middle of a meeting: wait until the recording stops.
+    /// Never quit for an update in the middle of a meeting: wait until the recording stops and its notes are made.
     func updater(_ updater: SPUUpdater, shouldPostponeRelaunchForUpdate item: SUAppcastItem,
                  untilInvokingBlock installHandler: @escaping () -> Void) -> Bool {
-        guard AppDelegate.model.isRecording else { return false }
+        // Also wait while notes are being made after the meeting, or the relaunch would kill that job.
+        func busy() -> Bool { AppDelegate.model.isRecording || !AppDelegate.model.busy.isEmpty }
+        guard busy() else { return false }
         func wait() {
             DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
-                AppDelegate.model.isRecording ? wait() : installHandler()
+                busy() ? wait() : installHandler()
             }
         }
         wait()

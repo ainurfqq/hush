@@ -12,6 +12,9 @@ security find-certificate -c "Hush Local Signing" "$HOME/Library/Keychains/login
 scripts/dmg-deps.sh
 HUSH_DMG=1 scripts/build.sh | tail -2
 codesign --verify --deep --strict build/Hush.app
+# build.sh falls back to ad-hoc if signing fails (locked keychain): that would cost every user their permissions.
+codesign -dvv build/Hush.app 2>&1 | grep -q "Authority=Hush Local Signing" \
+  || { echo "Hush.app is not signed with 'Hush Local Signing' (keychain locked?). Not making the DMG." >&2; exit 1; }
 
 DMG="build/Hush-$V.dmg"; STAGE="build/dmg-stage"
 [ -e "$STAGE" ] && mv "$STAGE" "build/.old-stage-$$"

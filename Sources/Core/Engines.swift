@@ -20,6 +20,10 @@ public enum Engines {
         return Shell.which("whisper-server")
     }
 
+    /// Inside Hush.app (DMG build) there is no `hush` command on PATH, so point at the app's own button.
+    public static var inApp: Bool { Bundle.main.bundleURL.pathExtension == "app" }
+    public static var setupHint: String { inApp ? "Open the Hush menu and click Finish the download." : "Run: hush setup" }
+
     /// Human-readable readiness report (used by `hush doctor` and the app's setup panel).
     public static func check(_ c: Config = .load()) -> [(String, Bool, String)] {
         let fm = FileManager.default
@@ -40,14 +44,18 @@ public final class WhisperServer {
     private(set) public var port: Int = 0
     private let lock = NSLock()
     private var modelPath = ""
+    /// Set while a final transcript runs (Pipeline): the server must not be swapped for the live model.
+    public var pinned = false
 
     public func ensureRunning(config: Config = .load(), live: Bool = false) throws -> Int {
         lock.lock(); defer { lock.unlock() }
         let model = Engines.asrModel(config, live: live).path
         if let p = process, p.isRunning, modelPath == model { return port }
+        // Notes for the last meeting are being made: live captions share that model instead of killing it mid-request.
+        if live, pinned, let p = process, p.isRunning { return port }
         process?.terminate()
-        guard let exe = Engines.whisperServer else { throw HushError.missing("whisper-server. Install with: brew install whisper-cpp") }
-        guard FileManager.default.fileExists(atPath: model) else { throw HushError.missing("ASR model at \(model). Run: hush setup") }
+        guard let exe = Engines.whisperServer else { throw HushError.missing("whisper-server. " + (Engines.inApp ? "Reinstall Hush from the download link." : "Install with: brew install whisper-cpp")) }
+        guard FileManager.default.fileExists(atPath: model) else { throw HushError.missing("ASR model at \(model). \(Engines.setupHint)") }
         let port = Int.random(in: 18100...18999)
         Self.killStale()
         let p = Process()
@@ -72,13 +80,16 @@ public final class WhisperServer {
     }
 
     static let watchdog = "\"$0\" \"$@\" & c=$!; trap 'kill $c 2>/dev/null' EXIT TERM INT HUP; while kill -0 $PPID 2>/dev/null && kill -0 $c 2>/dev/null; do sleep 1; done"
-    static var pidFile: URL { Paths.base.appendingPathComponent("whisper-server.pid") }
+    /// One file per program (app and CLI), so running `hush-cli` never stops the app's server, or the other way round.
+    static var pidFile: URL { Paths.base.appendingPathComponent("whisper-server-\(ProcessInfo.processInfo.processName).pid") }
 
     /// Kills a watchdog left by an earlier Hush process (its trap then stops the server).
+    /// Only if that pid is still our watchdog: after a reboot the number can belong to any other app.
     static func killStale() {
         guard let s = try? String(contentsOf: pidFile, encoding: .utf8), let pid = Int32(s.trimmingCharacters(in: .whitespacesAndNewlines)),
               pid != getpid() else { return }
-        kill(pid, SIGTERM)
+        let cmd = (try? Shell.run("/bin/ps", ["-p", String(pid), "-o", "command="], timeout: 5).stdout) ?? ""
+        if cmd.contains("whisper-server") { kill(pid, SIGTERM) }
         try? FileManager.default.removeItem(at: pidFile)
     }
 
@@ -111,6 +122,8 @@ public enum Transcriber {
         form.addField("response_format", "verbose_json")
         form.addField("language", language)
         form.addField("temperature", "0")
+        // With a fixed language, skip whisper.cpp's extra language-probability pass (one more encoder run per call).
+        if language != "auto" { form.addField("no_language_probabilities", "true") }
         let hint = Keyterms.prompt(config)
         if !hint.isEmpty { form.addField("prompt", hint) }
         var req = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/inference")!)
@@ -196,7 +209,7 @@ public enum Diarizer {
     /// Runs sherpa-onnx offline diarization. `speakers` > 0 forces that many clusters.
     public static func run(_ wav: URL, speakers: Int = 0, threshold: Double = 0.9) throws -> [DiarTurn] {
         let exe = Engines.sherpaDiarizer.path
-        guard FileManager.default.isExecutableFile(atPath: exe) else { throw HushError.missing("sherpa-onnx diarizer. Run: hush setup") }
+        guard FileManager.default.isExecutableFile(atPath: exe) else { throw HushError.missing("sherpa-onnx diarizer. \(Engines.setupHint)") }
         var args = ["--segmentation.pyannote-model=\(Engines.segmentationModel.path)",
                     "--embedding.model=\(Engines.embeddingModel.path)",
                     "--segmentation.num-threads=4", "--embedding.num-threads=4"]

@@ -114,13 +114,22 @@ public final class WAVStreamWriter {
         handle.seekToEndOfFile()
     }
 
+    /// The throwing FileHandle calls: on a full disk the old `write(_:)` raises an exception that kills the app.
+    /// Here the write fails, the audio so far stays valid, and `failed` tells the recorder.
+    private(set) public var failed = false
     public func append(_ samples: [Float]) {
         lock.lock(); defer { lock.unlock() }
-        handle.write(WAV.pcm16(samples[...]))
-        frames += samples.count
-        handle.seek(toFileOffset: 0)
-        handle.write(WAV.header(frames: frames))
-        handle.seekToEndOfFile()
+        guard !failed else { return }
+        do {
+            try handle.write(contentsOf: WAV.pcm16(samples[...]))
+            frames += samples.count
+            try handle.seek(toOffset: 0)
+            try handle.write(contentsOf: WAV.header(frames: frames))
+            try handle.seekToEnd()
+        } catch {
+            failed = true
+            Log.write("audio write failed (disk full?): \(error)")
+        }
     }
 
     public func close() {
